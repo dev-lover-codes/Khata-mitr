@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { redirect } from 'next/navigation';
 
 export async function signInWithPhone(phone: string) {
   try {
@@ -74,6 +75,26 @@ export async function signUpWithEmail(email: string, password: string) {
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown auth error' };
   }
+}
+
+export async function signInWithGoogle(redirectToOrigin: string) {
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: `${redirectToOrigin}/auth/callback`,
+    },
+  });
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+
+  if (data.url) {
+    redirect(data.url);
+  }
+
+  return { success: false, error: 'OAuth redirect URL not generated.' };
 }
 
 export async function signOut() {

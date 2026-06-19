@@ -11,6 +11,7 @@ export default function SetupProfilePage() {
 
   const [userId, setUserId] = useState<string | null>(null);
   const [phone, setPhone] = useState<string>('');
+  const [sessionUserPhone, setSessionUserPhone] = useState<string | null>(null);
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<'retailer' | 'customer'>('retailer');
   const [businessName, setBusinessName] = useState('');
@@ -27,18 +28,28 @@ export default function SetupProfilePage() {
         router.push('/');
       } else {
         setUserId(session.user.id);
-        setPhone(session.user.phone || session.user.email || '');
+        const userPhone = session.user.phone || null;
+        setSessionUserPhone(userPhone);
+        if (userPhone) {
+          setPhone(userPhone);
+        } else {
+          setPhone('');
+        }
 
         // Check if profile already exists
         const { data: profile } = await supabase
           .from('profiles')
-          .select('id')
+          .select('role')
           .eq('id', session.user.id)
           .single();
 
         if (profile) {
-          // If profile exists, redirect to main page/dashboard
-          router.push('/');
+          // If profile exists, redirect to dashboard based on role
+          if (profile.role === 'retailer') {
+            router.push('/retailer');
+          } else {
+            router.push('/customer');
+          }
         }
       }
     }
@@ -49,6 +60,14 @@ export default function SetupProfilePage() {
     e.preventDefault();
     if (!fullName) {
       setErrorMessage(language === 'hi' ? 'कृपया अपना पूरा नाम दर्ज करें।' : 'Please enter your full name.');
+      return;
+    }
+    if (phone && !/^\+91[6-9]\d{9}$/.test(phone)) {
+      setErrorMessage(
+        language === 'hi'
+          ? 'कृपया एक वैध 10-अंकों का मोबाइल नंबर दर्ज करें।'
+          : 'Please enter a valid 10-digit mobile number.'
+      );
       return;
     }
     if (role === 'retailer' && !businessName) {
@@ -73,10 +92,24 @@ export default function SetupProfilePage() {
           preferred_language: language
         });
 
-      if (error) throw error;
+      if (error) {
+        // Handle duplicate key error specifically for user-friendliness
+        if (error.code === '23505') {
+          throw new Error(
+            language === 'hi'
+              ? 'यह मोबाइल नंबर पहले से ही किसी अन्य खाते से जुड़ा है।'
+              : 'This mobile number is already registered with another account.'
+          );
+        }
+        throw error;
+      }
 
-      // Successfully saved, navigate to home/assistant page
-      router.push('/');
+      // Successfully saved, navigate to the correct dashboard page
+      if (role === 'retailer') {
+        router.push('/retailer');
+      } else {
+        router.push('/customer');
+      }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Error creating profile';
       setErrorMessage(errMsg);
@@ -140,6 +173,30 @@ export default function SetupProfilePage() {
               placeholder={language === 'hi' ? 'नाम दर्ज करें (उदा. रामू कुमार)' : 'Enter name (e.g., Ramu Kumar)'}
               className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/20 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all text-zinc-800 dark:text-zinc-200"
             />
+          </div>
+
+          {/* Phone Number Input */}
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
+              {language === 'hi' ? 'मोबाइल नंबर (वैकल्पिक, दुकानदार द्वारा खोजने के लिए)' : 'Mobile Number (Optional, for retailer lookup)'}
+            </label>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-zinc-400 pointer-events-none">
+                +91
+              </span>
+              <input
+                type="tel"
+                value={phone.startsWith('+91') ? phone.replace('+91', '') : phone}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, ''); // only digits
+                  setPhone(val ? `+91${val}` : '');
+                }}
+                maxLength={10}
+                placeholder={language === 'hi' ? '10-अंकों का मोबाइल नंबर' : '10-digit mobile number'}
+                disabled={!!sessionUserPhone}
+                className="w-full pl-13 pr-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/20 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all text-zinc-800 dark:text-zinc-200 disabled:opacity-60"
+              />
+            </div>
           </div>
 
           {/* Role Choice */}

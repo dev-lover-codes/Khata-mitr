@@ -56,14 +56,16 @@
 
 ---
 
-## 3. Plan and Steps for Current Request
+- [x] **Step 16**: Redefine Gemini client configuration and tool signatures (`add_transaction`, `get_balance`, `get_ledger_history`, `get_weather`, and `calculate`) in `src/lib/gemini.ts`.
+- [x] **Step 17**: Create the core AI serverless handler at `src/app/api/assistant/route.ts` with full database relationship lookup and tool execution callbacks.
+- [x] **Step 18**: Ensure both the user message and assistant reply are logged inside the `chat_logs` table using the user's UUID.
+- [x] **Step 19**: Create a floating chat UI widget `src/components/ChatAssistant.tsx` that loads previous message histories and communicates with the assistant endpoint.
+- [x] **Step 20**: Wire the `ChatAssistant` component inside `src/app/page.tsx` for authenticated users.
+- [x] **Step 21**: Run ESLint validation checks and verify error-free compilation of the codebase.
+- [x] **Step 22**: Create `/src/app/retailer/page.tsx` to render the Retailer Dashboard.
+- [x] **Step 23**: Create `/src/app/customer/page.tsx` to render the Customer Dashboard.
+- [x] **Step 24**: Update `/src/app/page.tsx` to redirect authenticated users to their corresponding dashboard route.
+- [x] **Step 25**: Update `/src/app/setup-profile/page.tsx` to redirect users to their corresponding dashboard route.
+- [x] **Step 26**: Update the callback handler `/src/app/auth/callback/route.ts` to redirect to `/retailer` or `/customer`.
+- [x] **Step 27**: Verify compilation and run lint checks.
 
-- [x] **Step 1**: Identify and locate the ledger UI components (`LedgerHistory.tsx`, `RetailerDashboard.tsx`, `CustomerDashboard.tsx`).
-- [x] **Step 2**: Refactor `LedgerHistory.tsx` to calculate running balances iteratively without re-assigning variables in `.map()` closures to satisfy React compiler rules.
-- [x] **Step 3**: Fix the types in all dashboards to avoid implicit or explicit `any` casts by using `unknown` and proper DB schema interfaces.
-- [x] **Step 4**: Address the `react-hooks/set-state-in-effect` linting errors in `RetailerDashboard.tsx` and `CustomerDashboard.tsx` using inline comments and asynchronous handlers.
-- [x] **Step 5**: Reorder function declarations in `src/app/page.tsx` (like hoisting `fetchProfile` inside `useCallback`) to fix the temporal dead zone and missing dependency issues.
-- [x] **Step 6**: Identify missing localizations for login flows (OTP inputs, role titles, and submit button actions) and update `src/lib/translations.ts`.
-- [x] **Step 7**: Link local CLI to remote Supabase project ref `shpivpyjrevwouefxsma`.
-- [x] **Step 8**: Deploy database tables, indexes, triggers, and Row Level Security (RLS) policies to the remote database using `supabase db push`.
-- [x] **Step 9**: Regenerate matching TypeScript interfaces from the live schema and verify build/lint correctness.

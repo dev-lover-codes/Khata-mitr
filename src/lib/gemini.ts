@@ -1,101 +1,105 @@
 import { GoogleGenAI, Type } from '@google/genai';
 
 // Initialize the Google Gen AI client using GEMINI_API_KEY
-// Note: Fallback to empty string if not defined; should be present in process.env
 export const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || '',
 });
 
 // Tool Definitions
-export const transactionTool = {
-  name: 'record_transaction',
-  description: 'Records a credit (Udhaar/Lent) or debit (Jama/Received) ledger entry for a customer.',
+export const addTransactionTool = {
+  name: 'add_transaction',
+  description: 'Adds a new credit (money lent/owed) or debit (money received/settled) transaction between a retailer and a customer.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      customerName: {
+      retailer_id: {
         type: Type.STRING,
-        description: 'Name of the customer (e.g., Ramu, Raju, Mohan).'
+        description: 'The UUID of the retailer.'
       },
-      amount: {
-        type: Type.NUMBER,
-        description: 'Amount of money in Rupees.'
+      customer_id: {
+        type: Type.STRING,
+        description: 'The UUID of the customer.'
       },
       type: {
         type: Type.STRING,
         enum: ['credit', 'debit'],
-        description: 'Use "credit" if money is lent/owed (Udhaar) and "debit" if money is received/settled (Jama).'
+        description: 'Use "credit" if the retailer lent money (Udhaar) and "debit" if the retailer received money (Jama).'
       },
-      description: {
+      amount: {
+        type: Type.NUMBER,
+        description: 'Amount of money in Rupees (INR).'
+      },
+      note: {
         type: Type.STRING,
-        description: 'Optional description of the items bought/returned or reason (e.g., "doodh", "sugar").'
+        description: 'Optional note or description for the transaction (e.g. sugar, milk, repayment).'
       }
     },
-    required: ['customerName', 'amount', 'type']
+    required: ['retailer_id', 'customer_id', 'type', 'amount']
   }
 };
 
-export const reminderTool = {
-  name: 'create_reminder',
-  description: 'Schedules a payment collection reminder for a customer.',
+export const getBalanceTool = {
+  name: 'get_balance',
+  description: 'Retrieves the running balance between a retailer and a customer.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      customerName: {
+      retailer_id: {
         type: Type.STRING,
-        description: 'Name of the customer.'
+        description: 'The UUID of the retailer.'
       },
-      message: {
+      customer_id: {
         type: Type.STRING,
-        description: 'Reminder message to send (e.g., "Please clear your outstanding bill of Rs 500").'
-      },
-      dueDate: {
-        type: Type.STRING,
-        description: 'The due date and time for the reminder in ISO 8601 format (e.g. 2026-06-25T10:00:00Z).'
+        description: 'The UUID of the customer.'
       }
     },
-    required: ['customerName', 'message', 'dueDate']
+    required: ['retailer_id', 'customer_id']
+  }
+};
+
+export const getLedgerHistoryTool = {
+  name: 'get_ledger_history',
+  description: 'Retrieves the chronological list of transactions (credit and debit log) between a retailer and a customer.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      retailer_id: {
+        type: Type.STRING,
+        description: 'The UUID of the retailer.'
+      },
+      customer_id: {
+        type: Type.STRING,
+        description: 'The UUID of the customer.'
+      }
+    },
+    required: ['retailer_id', 'customer_id']
   }
 };
 
 export const weatherTool = {
   name: 'get_weather',
-  description: 'Fetches the current weather information for a given city or locality.',
+  description: 'Retrieves current weather status for a given city.',
   parameters: {
     type: Type.OBJECT,
     properties: {
-      location: {
+      city: {
         type: Type.STRING,
-        description: 'The city or region to query weather for (e.g., Delhi, Mumbai, Lucknow).'
+        description: 'Name of the city (e.g. Delhi, Mumbai).'
       }
     },
-    required: ['location']
+    required: ['city']
   }
 };
 
-export const cricketTool = {
-  name: 'get_cricket_score',
-  description: 'Fetches live cricket match scores and updates.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      matchId: {
-        type: Type.STRING,
-        description: 'Optional match ID. If not provided, returns list of current live matches.'
-      }
-    }
-  }
-};
-
-export const mathTool = {
-  name: 'solve_math',
-  description: 'Performs arithmetic calculation for billing, accounting, and ledger interest calculations.',
+export const calculateTool = {
+  name: 'calculate',
+  description: 'Evaluates basic mathematical expressions.',
   parameters: {
     type: Type.OBJECT,
     properties: {
       expression: {
         type: Type.STRING,
-        description: 'The mathematical expression to evaluate (e.g. "120 * 5 + 450").'
+        description: 'The mathematical expression to evaluate (e.g. "150 + 200 * 3").'
       }
     },
     required: ['expression']
@@ -104,9 +108,9 @@ export const mathTool = {
 
 // All available tools grouped
 export const khataMitraTools = [
-  transactionTool,
-  reminderTool,
+  addTransactionTool,
+  getBalanceTool,
+  getLedgerHistoryTool,
   weatherTool,
-  cricketTool,
-  mathTool
+  calculateTool
 ];

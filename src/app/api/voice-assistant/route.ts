@@ -1,73 +1,97 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ai, khataMitraTools } from '@/lib/gemini';
 import { createClient } from '@/lib/supabase/server';
+import { z } from 'zod';
 
-interface ToolArguments {
-  customerName?: string;
-  amount?: number;
-  type?: 'credit' | 'debit';
-  description?: string;
-  message?: string;
-  dueDate?: string;
-  location?: string;
-  expression?: string;
-}
+const voiceRequestSchema = z.object({
+  audio: z.string().min(1, 'Audio data is required'),
+  mimeType: z.string().optional(),
+  userId: z.string().uuid('Invalid user ID')
+});
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { audio, mimeType } = body; // audio is a base64 encoded string
+    const parseResult = voiceRequestSchema.safeParse(body);
 
-    if (!audio) {
-      return NextResponse.json({ error: 'Audio data is required' }, { status: 400 });
+    if (!parseResult.success) {
+      return NextResponse.json({ error: parseResult.error.errors[0].message }, { status: 400 });
     }
+
+    const { audio, mimeType, userId } = parseResult.data;
 
     const supabase = await createClient();
 
-    // 1. Resolve user profile (default to a mock/demo retailer if not authenticated)
-    let retailerProfileId = '';
-    let retailerName = 'Demo Retailer';
+    // 1. Resolve user profile
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
 
-    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!profile) {
+      return NextResponse.json({ error: 'User profile not found.' }, { status: 404 });
+    }
 
-    if (authUser) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .eq('user_id', authUser.id)
-        .single();
+    // 2. Fetch active relationships to build the list of context mapping
+    let contextInfo = `User ID: ${userId}\n`;
+    contextInfo += `User Name: ${profile.full_name}\n`;
+    contextInfo += `User Role: ${profile.role}\n`;
 
-      if (profile) {
-        retailerProfileId = profile.id;
-        retailerName = profile.full_name;
+    if (profile.role === 'retailer') {
+      contextInfo += `Shop/Business Name: ${profile.business_name || 'General Store'}\n`;
+      contextInfo += `Associated Customers (Retailer Ledger Relationships):\n`;
+      
+      const { data: relationships } = await supabase
+        .from('relationships')
+        .select('customer_id, balance, profiles!customer_id(full_name, phone)')
+        .eq('retailer_id', userId);
+
+      if (relationships && relationships.length > 0) {
+        relationships.forEach((r) => {
+          const customer = r.profiles as unknown as { full_name: string; phone: string | null } | null;
+          contextInfo += `- Customer: ${customer?.full_name || 'Unknown'}, ID: ${r.customer_id}, Phone: ${customer?.phone || 'None'}, Running Balance: ₹${r.balance || 0}\n`;
+        });
+      } else {
+        contextInfo += `(No customers found. Retailer has no active ledgers yet.)\n`;
+      }
+    } else {
+      contextInfo += `Associated Retailers (Customer Ledger Relationships):\n`;
+      
+      const { data: retailerRels } = await supabase
+        .from('relationships')
+        .select('retailer_id, balance, profiles!retailer_id(full_name, business_name)')
+        .eq('customer_id', userId);
+      
+      if (retailerRels && retailerRels.length > 0) {
+        retailerRels.forEach((r) => {
+          const retailer = r.profiles as unknown as { full_name: string; business_name: string | null } | null;
+          contextInfo += `- Retailer: ${retailer?.full_name || 'Unknown'}, Business: ${retailer?.business_name || 'None'}, ID: ${r.retailer_id}, Balance Owed: ₹${r.balance || 0}\n`;
+        });
+      } else {
+        contextInfo += `(No retailers found. Customer has no active ledger links yet.)\n`;
       }
     }
 
-    // Fallback demo user
-    if (!retailerProfileId) {
-      const { data: demo } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .eq('phone', '+919876543210')
-        .single();
-
-      if (demo) {
-        retailerProfileId = demo.id;
-        retailerName = demo.full_name;
-      }
-    }
-
-    // 2. Multimodal Gemini Setup
-    const systemInstruction = `You are KhataMitra, a bilingual AI ledger assistant for local shops.
-Current Retailer: ${retailerName} (ID: ${retailerProfileId})
+    // 3. System Prompt and Instructions
+    const systemInstruction = `You are KhataMitra, a friendly, concise, and helpful financial assistant for Indian shopkeepers (retailers) and customers.
+You support interactions in Hindi (हिंदी), English, and Hinglish (Hindi written in Latin script, e.g., "Ramu ko 200 rupaye udhaar").
+Your current user profile context is:
+${contextInfo}
 Current Time: ${new Date().toISOString()}
 
-The user is sending an audio/voice message. Listen to the audio, determine the command (e.g. logging Udhaar/Jama, creating reminders), and execute the appropriate tool call.
-Always answer in a conversational bilingual format (Hindi + English). First transcribe what you heard, then provide the response.`;
+The user is sending a voice message. Listen to the audio, determine the command (e.g. logging Udhaar/Jama, checking balances, weather, math), and execute the appropriate tool call.
+Always answer in a conversational bilingual format (Hindi + English). First transcribe what you heard from the user, and then provide the assistant response.
+
+Operational Guidelines:
+1. NEVER invent or hallucinate balances, customer names, or transaction histories. Always call the relevant database tools first to query or record data.
+2. Trust tool results completely. If a tool reports a balance of ₹500, state it exactly. If a transaction succeeds, confirm it.
+3. Be polite and concise. Indian shopkeepers value quick, clear answers without excessive fluff.
+4. Answer in the language preferred by the user, or use Hinglish if they talk in Hinglish.
+5. If the user asks about a customer or retailer not in their list, inform them politely that the connection or customer does not exist in their active database yet.
+6. When recording or querying ledger items, invoke the matching function declaration.`;
 
     const model = 'gemini-2.0-flash';
-
-    // Prepare audio content (Content object with user role)
     const audioContent = {
       role: 'user',
       parts: [
@@ -80,7 +104,6 @@ Always answer in a conversational bilingual format (Hindi + English). First tran
       ]
     };
 
-    // Call model with audio input
     const response = await ai.models.generateContent({
       model,
       contents: [audioContent],
@@ -93,159 +116,134 @@ Always answer in a conversational bilingual format (Hindi + English). First tran
     const functionCalls = response.functionCalls;
     let finalAnswer = response.text || '';
 
-    // 3. Handle Tool Calls
+    // 4. Handle Tool Calls
     if (functionCalls && functionCalls.length > 0) {
       const call = functionCalls[0];
-      const args = call.args as unknown as ToolArguments;
+      const name = call.name;
+      const args = call.args as Record<string, unknown>;
       let toolResponse: Record<string, unknown> = { success: false, message: 'Tool execution failed' };
 
       try {
-        if (call.name === 'record_transaction') {
-          const { customerName, amount, type, description } = args;
-
-          if (customerName && amount && type) {
-            let customerId = '';
-            const { data: customers } = await supabase
-              .from('profiles')
+        if (name === 'add_transaction') {
+          const { retailer_id, customer_id, type, amount, note } = args as {
+            retailer_id: string;
+            customer_id: string;
+            type: 'credit' | 'debit';
+            amount: number;
+            note?: string;
+          };
+          
+          // Get or create relationship record
+          let { data: rel } = await supabase
+            .from('relationships')
+            .select('id')
+            .eq('retailer_id', retailer_id)
+            .eq('customer_id', customer_id)
+            .single();
+            
+          if (!rel) {
+            const { data: newRel, error: relError } = await supabase
+              .from('relationships')
+              .insert({
+                retailer_id,
+                customer_id,
+                balance: 0
+              })
               .select('id')
-              .eq('role', 'customer')
-              .ilike('full_name', `%${customerName}%`);
+              .single();
+            if (relError) throw relError;
+            rel = newRel;
+          }
 
-            if (customers && customers.length > 0) {
-              customerId = customers[0].id;
-            } else {
-              // Create customer
-              const { data: newCust } = await supabase
-                .from('profiles')
-                .insert({
-                  role: 'customer',
-                  full_name: customerName,
-                  phone: `+919999${Math.floor(100000 + Math.random() * 900000)}`
-                })
-                .select('id')
-                .single();
+          if (rel) {
+            const { error: txError } = await supabase
+              .from('transactions')
+              .insert({
+                relationship_id: rel.id,
+                type,
+                amount: Number(amount),
+                note: note || null,
+                created_by: retailer_id,
+                transaction_date: new Date().toISOString()
+              });
 
-              if (newCust) {
-                customerId = newCust.id;
-                await supabase
-                  .from('relationships')
-                  .insert({
-                    retailer_id: retailerProfileId,
-                    customer_id: customerId
-                  });
-              }
-            }
-
-            if (customerId) {
-              const { error: txError } = await supabase
-                .from('transactions')
-                .insert({
-                  retailer_id: retailerProfileId,
-                  customer_id: customerId,
-                  amount,
-                  type,
-                  description: description || `AI Voice logged ${type}`
-                });
-
-              if (!txError) {
-                toolResponse = {
-                  success: true,
-                  message: `Successfully logged voice transaction: ${type} of ₹${amount} for ${customerName}.`
-                };
-              }
-            }
+            if (txError) throw txError;
+            toolResponse = { success: true, message: `Successfully logged ${type} transaction of ₹${amount}.` };
           }
         } 
         
-        else if (call.name === 'create_reminder') {
-          const { customerName, message: reminderMsg, dueDate } = args;
+        else if (name === 'get_balance') {
+          const { retailer_id, customer_id } = args as { retailer_id: string; customer_id: string };
+          const { data: rel, error } = await supabase
+            .from('relationships')
+            .select('balance')
+            .eq('retailer_id', retailer_id)
+            .eq('customer_id', customer_id)
+            .single();
 
-          if (customerName && reminderMsg && dueDate) {
-            let customerId = '';
-            const { data: customers } = await supabase
-              .from('profiles')
-              .select('id')
-              .eq('role', 'customer')
-              .ilike('full_name', `%${customerName}%`);
-
-            if (customers && customers.length > 0) {
-              customerId = customers[0].id;
-            } else {
-              const { data: newCust } = await supabase
-                .from('profiles')
-                .insert({
-                  role: 'customer',
-                  full_name: customerName,
-                  phone: `+919999${Math.floor(100000 + Math.random() * 900000)}`
-                })
-                .select('id')
-                .single();
-
-              if (newCust) {
-                customerId = newCust.id;
-                await supabase
-                  .from('relationships')
-                  .insert({
-                    retailer_id: retailerProfileId,
-                    customer_id: customerId
-                  });
-              }
-            }
-
-            if (customerId) {
-              const { error: remError } = await supabase
-                .from('reminders')
-                .insert({
-                  retailer_id: retailerProfileId,
-                  customer_id: customerId,
-                  message: reminderMsg,
-                  due_date: dueDate,
-                  status: 'pending'
-                });
-
-              if (!remError) {
-                toolResponse = {
-                  success: true,
-                  message: `Scheduled reminder for ${customerName} on ${new Date(dueDate).toLocaleString()}.`
-                };
-              }
-            }
+          if (error) {
+            toolResponse = { success: true, balance: 0, message: 'No active balance record found. Balance is ₹0.' };
+          } else {
+            toolResponse = { success: true, balance: rel.balance, message: `Current balance is ₹${rel.balance}.` };
           }
         } 
         
-        else if (call.name === 'get_weather') {
-          const { location } = args;
-          toolResponse = { success: true, location: location || 'Unknown', temperature: '29°C', condition: 'Rainy / बारिश' };
+        else if (name === 'get_ledger_history') {
+          const { retailer_id, customer_id } = args as { retailer_id: string; customer_id: string };
+          
+          const { data: rel } = await supabase
+            .from('relationships')
+            .select('id')
+            .eq('retailer_id', retailer_id)
+            .eq('customer_id', customer_id)
+            .single();
+
+          if (!rel) {
+            toolResponse = { success: true, history: [], message: 'No transactions found for this customer.' };
+          } else {
+            const { data: txs, error } = await supabase
+              .from('transactions')
+              .select('amount, type, note, transaction_date, created_at')
+              .eq('relationship_id', rel.id)
+              .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            toolResponse = { success: true, history: txs || [] };
+          }
         } 
         
-        else if (call.name === 'get_cricket_score') {
-          toolResponse = { success: true, score: 'India: 182/4, live match updates' };
+        else if (name === 'get_weather') {
+          const { city } = args as { city?: string };
+          toolResponse = {
+            success: true,
+            city: city || 'Unknown',
+            temperature: '32°C',
+            condition: 'Partly Cloudy / आंशिक रूप से बादल छाए हैं',
+            humidity: '60%'
+          };
         } 
         
-        else if (call.name === 'solve_math') {
-          const { expression } = args;
-          if (expression) {
-            try {
-              const cleanExpr = expression.replace(/[^0-9+\-*/().\s]/g, '');
-              const result = Function(`"use strict"; return (${cleanExpr})`)();
-              toolResponse = { success: true, expression, result };
-            } catch {
-              toolResponse = { success: false };
-            }
+        else if (name === 'calculate') {
+          const { expression } = args as { expression: string };
+          try {
+            const cleanExpr = expression.replace(/[^0-9+\-*/().\s]/g, '');
+            const result = Function(`"use strict"; return (${cleanExpr})`)();
+            toolResponse = { success: true, expression, result };
+          } catch {
+            toolResponse = { success: false, error: 'Invalid mathematical expression' };
           }
         }
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Unknown tool error';
-        toolResponse = { success: false, error: errorMessage };
+        toolResponse = { success: false, error: err instanceof Error ? err.message : 'Unknown tool error' };
       }
 
-      // Re-invoke model with function response
+      // Send execution response back to Gemini to compile final conversational response
       const finalResult = await ai.models.generateContent({
         model,
         contents: [
           audioContent,
           { role: 'model', parts: [{ functionCall: call }] },
-          { role: 'user', parts: [{ functionResponse: { name: call.name, response: toolResponse } }] }
+          { role: 'user', parts: [{ functionResponse: { name, response: toolResponse } }] }
         ],
         config: {
           systemInstruction
@@ -255,20 +253,26 @@ Always answer in a conversational bilingual format (Hindi + English). First tran
       finalAnswer = finalResult.text || '';
     }
 
-    // 4. Log interaction
-    await supabase
-      .from('chat_logs')
-      .insert({
-        user_id: retailerProfileId,
+    // 5. Log chat interaction to database
+    await supabase.from('chat_logs').insert([
+      {
+        user_id: userId,
         message: '[Voice Input]',
-        response: finalAnswer,
-        mode: 'voice'
-      });
+        role: 'user',
+        language: profile.preferred_language || 'hi'
+      },
+      {
+        user_id: userId,
+        message: finalAnswer,
+        role: 'assistant',
+        language: profile.preferred_language || 'hi'
+      }
+    ]);
 
     return NextResponse.json({ response: finalAnswer });
 
   } catch (error) {
-    console.error('Error in Voice Assistant:', error);
+    console.error('Error in Voice Assistant API:', error);
     const errorMessage = error instanceof Error ? error.message : 'Internal Server Error';
     return NextResponse.json({ error: errorMessage }, { status: 500 });
   }

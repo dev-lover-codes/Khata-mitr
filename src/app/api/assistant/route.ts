@@ -1,107 +1,91 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ai, khataMitraTools } from '@/lib/gemini';
 import { createClient } from '@/lib/supabase/server';
+import { z } from 'zod';
 
-interface ToolArguments {
-  customerName?: string;
-  amount?: number;
-  type?: 'credit' | 'debit';
-  description?: string;
-  message?: string;
-  dueDate?: string;
-  location?: string;
-  expression?: string;
-}
+const requestSchema = z.object({
+  message: z.string().min(1, 'Message is required'),
+  userId: z.string().uuid('Invalid user ID')
+});
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { message } = body;
+    const parseResult = requestSchema.safeParse(body);
 
-    if (!message) {
-      return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+    if (!parseResult.success) {
+      return NextResponse.json({ error: parseResult.error.errors[0].message }, { status: 400 });
     }
+
+    const { message, userId } = parseResult.data;
 
     const supabase = await createClient();
 
-    // 1. Resolve user profile (default to a mock/demo retailer if not authenticated)
-    let retailerProfileId = '';
-    let retailerName = 'Demo Retailer';
+    // 1. Resolve user profile
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
 
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-
-    if (authUser) {
-      // Find retailer profile
-      let { data: profile } = await supabase
-        .from('profiles')
-        .select('id, full_name, role')
-        .eq('user_id', authUser.id)
-        .single();
-
-      if (!profile) {
-        // Auto-seed profile for testing
-        const { data: newProfile } = await supabase
-          .from('profiles')
-          .insert({
-            user_id: authUser.id,
-            role: 'retailer',
-            full_name: authUser.user_metadata?.full_name || 'Retailer User',
-            phone: authUser.phone || `+91${Math.floor(1000000000 + Math.random() * 9000000000)}`,
-            shop_name: 'KhataMitra General Store'
-          })
-          .select('id, full_name, role')
-          .single();
-
-        if (newProfile) {
-          profile = newProfile;
-        }
-      }
-
-      if (profile) {
-        retailerProfileId = profile.id;
-        retailerName = profile.full_name;
-      }
+    if (!profile) {
+      return NextResponse.json({ error: 'User profile not found.' }, { status: 404 });
     }
 
-    // Fallback: Seed / Fetch a demo retailer from database so API never crashes in dev
-    if (!retailerProfileId) {
-      const { data: existingDemo } = await supabase
-        .from('profiles')
-        .select('id, full_name')
-        .eq('phone', '+919876543210')
-        .single();
+    // 2. Fetch active relationships to build the list of context mapping
+    let contextInfo = `User ID: ${userId}\n`;
+    contextInfo += `User Name: ${profile.full_name}\n`;
+    contextInfo += `User Role: ${profile.role}\n`;
 
-      if (existingDemo) {
-        retailerProfileId = existingDemo.id;
-        retailerName = existingDemo.full_name;
+    if (profile.role === 'retailer') {
+      contextInfo += `Shop/Business Name: ${profile.business_name || 'General Store'}\n`;
+      contextInfo += `Associated Customers (Retailer Ledger Relationships):\n`;
+      
+      const { data: relationships } = await supabase
+        .from('relationships')
+        .select('customer_id, balance, profiles!customer_id(full_name, phone)')
+        .eq('retailer_id', userId);
+
+      if (relationships && relationships.length > 0) {
+        relationships.forEach((r) => {
+          const customer = r.profiles as unknown as { full_name: string; phone: string | null } | null;
+          contextInfo += `- Customer: ${customer?.full_name || 'Unknown'}, ID: ${r.customer_id}, Phone: ${customer?.phone || 'None'}, Running Balance: ₹${r.balance || 0}\n`;
+        });
       } else {
-        // Insert a demo retailer
-        const { data: newDemo } = await supabase
-          .from('profiles')
-          .insert({
-            role: 'retailer',
-            full_name: 'Raju Bhai (Kirana)',
-            phone: '+919876543210',
-            shop_name: 'Mitra General Store'
-          })
-          .select('id, full_name')
-          .single();
-
-        if (newDemo) {
-          retailerProfileId = newDemo.id;
-          retailerName = newDemo.full_name;
-        }
+        contextInfo += `(No customers found. Retailer has no active ledgers yet.)\n`;
+      }
+    } else {
+      contextInfo += `Associated Retailers (Customer Ledger Relationships):\n`;
+      
+      const { data: retailerRels } = await supabase
+        .from('relationships')
+        .select('retailer_id, balance, profiles!retailer_id(full_name, business_name)')
+        .eq('customer_id', userId);
+      
+      if (retailerRels && retailerRels.length > 0) {
+        retailerRels.forEach((r) => {
+          const retailer = r.profiles as unknown as { full_name: string; business_name: string | null } | null;
+          contextInfo += `- Retailer: ${retailer?.full_name || 'Unknown'}, Business: ${retailer?.business_name || 'None'}, ID: ${r.retailer_id}, Balance Owed: ₹${r.balance || 0}\n`;
+        });
+      } else {
+        contextInfo += `(No retailers found. Customer has no active ledger links yet.)\n`;
       }
     }
 
-    // 2. Call Gemini
-    const systemInstruction = `You are KhataMitra, a bilingual AI ledger assistant for retailers and customers.
-Current Retailer: ${retailerName} (ID: ${retailerProfileId})
+    // 3. System Prompt and Instructions
+    const systemInstruction = `You are KhataMitra, a friendly, concise, and helpful financial assistant for Indian shopkeepers (retailers) and customers.
+You support interactions in Hindi (हिंदी), English, and Hinglish (Hindi written in Latin script, e.g., "Ramu ko 200 rupaye udhaar").
+Your current user profile context is:
+${contextInfo}
 Current Time: ${new Date().toISOString()}
 
-Handle user credit (Udhaar/उधार) and debit (Jama/जमा) records, reminders, weather, cricket scores, and math.
-Always write bilingual answers (mix of Hindi/English or clean translations). 
-If the user wants to record a transaction or reminder, invoke the relevant tool call.`;
+Operational Guidelines:
+1. NEVER invent or hallucinate balances, customer names, or transaction histories. Always call the relevant database tools first to query or record data.
+2. Trust tool results completely. If a tool reports a balance of ₹500, state it exactly. If a transaction succeeds, confirm it.
+3. Be polite and concise. Indian shopkeepers value quick, clear answers without excessive fluff.
+4. Answer in the language preferred by the user, or use Hinglish if they talk in Hinglish.
+5. If the user asks about a customer or retailer not in their list, inform them politely that the connection or customer does not exist in their active database yet.
+6. When recording or querying ledger items, invoke the matching function declaration.`;
 
     const model = 'gemini-2.0-flash';
     const response = await ai.models.generateContent({
@@ -116,183 +100,134 @@ If the user wants to record a transaction or reminder, invoke the relevant tool 
     const functionCalls = response.functionCalls;
     let finalAnswer = response.text || '';
 
-    // 3. Handle Tool Calls
+    // 4. Handle Tool Calls
     if (functionCalls && functionCalls.length > 0) {
       const call = functionCalls[0];
-      const args = call.args as unknown as ToolArguments;
+      const name = call.name;
+      const args = call.args as Record<string, unknown>;
       let toolResponse: Record<string, unknown> = { success: false, message: 'Tool execution failed' };
 
       try {
-        if (call.name === 'record_transaction') {
-          const { customerName, amount, type, description } = args;
-
-          if (customerName && amount && type) {
-            // Lookup customer profile by full_name or relationship
-            let customerId = '';
-            const { data: customers } = await supabase
-              .from('profiles')
-              .select('id, full_name')
-              .eq('role', 'customer')
-              .ilike('full_name', `%${customerName}%`);
-
-            if (customers && customers.length > 0) {
-              customerId = customers[0].id;
-            } else {
-              // Register a mock customer profile if not exists
-              const { data: newCust } = await supabase
-                .from('profiles')
-                .insert({
-                  role: 'customer',
-                  full_name: customerName,
-                  phone: `+919999${Math.floor(100000 + Math.random() * 900000)}`
-                })
-                .select('id')
-                .single();
-
-              if (newCust) {
-                customerId = newCust.id;
-
-                // Insert relationship link
-                await supabase
-                  .from('relationships')
-                  .insert({
-                    retailer_id: retailerProfileId,
-                    customer_id: customerId
-                  });
-              }
-            }
-
-            if (customerId) {
-              // Log transaction
-              const { error: txError } = await supabase
-                .from('transactions')
-                .insert({
-                  retailer_id: retailerProfileId,
-                  customer_id: customerId,
-                  amount,
-                  type,
-                  description: description || `AI logged ${type}`
-                });
-
-              if (!txError) {
-                toolResponse = {
-                  success: true,
-                  message: `Successfully logged ${type} of ₹${amount} for customer ${customerName}.`
-                };
-              } else {
-                toolResponse = { success: false, message: `DB Error: ${txError.message}` };
-              }
-            }
-          }
-        } 
-        
-        else if (call.name === 'create_reminder') {
-          const { customerName, message: reminderMsg, dueDate } = args;
-
-          if (customerName && reminderMsg && dueDate) {
-            let customerId = '';
-            const { data: customers } = await supabase
-              .from('profiles')
+        if (name === 'add_transaction') {
+          const { retailer_id, customer_id, type, amount, note } = args as {
+            retailer_id: string;
+            customer_id: string;
+            type: 'credit' | 'debit';
+            amount: number;
+            note?: string;
+          };
+          
+          // Get or create relationship record
+          let { data: rel } = await supabase
+            .from('relationships')
+            .select('id')
+            .eq('retailer_id', retailer_id)
+            .eq('customer_id', customer_id)
+            .single();
+            
+          if (!rel) {
+            const { data: newRel, error: relError } = await supabase
+              .from('relationships')
+              .insert({
+                retailer_id,
+                customer_id,
+                balance: 0
+              })
               .select('id')
-              .eq('role', 'customer')
-              .ilike('full_name', `%${customerName}%`);
+              .single();
+            if (relError) throw relError;
+            rel = newRel;
+          }
 
-            if (customers && customers.length > 0) {
-              customerId = customers[0].id;
-            } else {
-              // Create customer on the fly
-              const { data: newCust } = await supabase
-                .from('profiles')
-                .insert({
-                  role: 'customer',
-                  full_name: customerName,
-                  phone: `+919999${Math.floor(100000 + Math.random() * 900000)}`
-                })
-                .select('id')
-                .single();
+          if (rel) {
+            const { error: txError } = await supabase
+              .from('transactions')
+              .insert({
+                relationship_id: rel.id,
+                type,
+                amount: Number(amount),
+                note: note || null,
+                created_by: retailer_id,
+                transaction_date: new Date().toISOString()
+              });
 
-              if (newCust) {
-                customerId = newCust.id;
-                await supabase
-                  .from('relationships')
-                  .insert({
-                    retailer_id: retailerProfileId,
-                    customer_id: customerId
-                  });
-              }
-            }
-
-            if (customerId) {
-              const { error: remError } = await supabase
-                .from('reminders')
-                .insert({
-                  retailer_id: retailerProfileId,
-                  customer_id: customerId,
-                  message: reminderMsg,
-                  due_date: dueDate,
-                  status: 'pending'
-                });
-
-              if (!remError) {
-                toolResponse = {
-                  success: true,
-                  message: `Scheduled reminder for ${customerName} on ${new Date(dueDate).toLocaleString()}.`
-                };
-              } else {
-                toolResponse = { success: false, message: `DB Error: ${remError.message}` };
-              }
-            }
+            if (txError) throw txError;
+            toolResponse = { success: true, message: `Successfully logged ${type} transaction of ₹${amount}.` };
           }
         } 
         
-        else if (call.name === 'get_weather') {
-          const { location } = args;
-          // Return mock weather
+        else if (name === 'get_balance') {
+          const { retailer_id, customer_id } = args as { retailer_id: string; customer_id: string };
+          const { data: rel, error } = await supabase
+            .from('relationships')
+            .select('balance')
+            .eq('retailer_id', retailer_id)
+            .eq('customer_id', customer_id)
+            .single();
+
+          if (error) {
+            toolResponse = { success: true, balance: 0, message: 'No active balance record found. Balance is ₹0.' };
+          } else {
+            toolResponse = { success: true, balance: rel.balance, message: `Current balance is ₹${rel.balance}.` };
+          }
+        } 
+        
+        else if (name === 'get_ledger_history') {
+          const { retailer_id, customer_id } = args as { retailer_id: string; customer_id: string };
+          
+          const { data: rel } = await supabase
+            .from('relationships')
+            .select('id')
+            .eq('retailer_id', retailer_id)
+            .eq('customer_id', customer_id)
+            .single();
+
+          if (!rel) {
+            toolResponse = { success: true, history: [], message: 'No transactions found for this customer.' };
+          } else {
+            const { data: txs, error } = await supabase
+              .from('transactions')
+              .select('amount, type, note, transaction_date, created_at')
+              .eq('relationship_id', rel.id)
+              .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            toolResponse = { success: true, history: txs || [] };
+          }
+        } 
+        
+        else if (name === 'get_weather') {
+          const { city } = args as { city?: string };
           toolResponse = {
             success: true,
-            location: location || 'Unknown',
-            temperature: '31°C',
+            city: city || 'Unknown',
+            temperature: '32°C',
             condition: 'Partly Cloudy / आंशिक रूप से बादल छाए हैं',
-            humidity: '65%'
+            humidity: '60%'
           };
         } 
         
-        else if (call.name === 'get_cricket_score') {
-          // Return mock cricket score
-          toolResponse = {
-            success: true,
-            match: 'India vs Australia (T20 World Cup)',
-            score: 'India: 182/4 (17.4 overs)',
-            batsmen: 'Hardik Pandya 42*(18), Rishabh Pant 68(40)',
-            status: 'In progress / मैच चालू है'
-          };
-        } 
-        
-        else if (call.name === 'solve_math') {
-          const { expression } = args;
-          if (expression) {
-            try {
-              // Safely evaluate basic math equations
-              const cleanExpr = expression.replace(/[^0-9+\-*/().\s]/g, '');
-              const result = Function(`"use strict"; return (${cleanExpr})`)();
-              toolResponse = { success: true, expression, result };
-            } catch {
-              toolResponse = { success: false, message: 'Invalid math expression' };
-            }
+        else if (name === 'calculate') {
+          const { expression } = args as { expression: string };
+          try {
+            const cleanExpr = expression.replace(/[^0-9+\-*/().\s]/g, '');
+            const result = Function(`"use strict"; return (${cleanExpr})`)();
+            toolResponse = { success: true, expression, result };
+          } catch {
+            toolResponse = { success: false, error: 'Invalid mathematical expression' };
           }
         }
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Unknown tool error';
-        toolResponse = { success: false, error: errorMessage };
+        toolResponse = { success: false, error: err instanceof Error ? err.message : 'Unknown tool error' };
       }
 
-      // Send execution response back to Gemini to compile the final conversational reply
+      // Send execution response back to Gemini to compile final conversational response
       const finalResult = await ai.models.generateContent({
         model,
         contents: [
           { role: 'user', parts: [{ text: message }] },
           { role: 'model', parts: [{ functionCall: call }] },
-          { role: 'user', parts: [{ functionResponse: { name: call.name, response: toolResponse } }] }
+          { role: 'user', parts: [{ functionResponse: { name, response: toolResponse } }] }
         ],
         config: {
           systemInstruction
@@ -302,15 +237,21 @@ If the user wants to record a transaction or reminder, invoke the relevant tool 
       finalAnswer = finalResult.text || '';
     }
 
-    // 4. Log chat interaction to database
-    await supabase
-      .from('chat_logs')
-      .insert({
-        user_id: retailerProfileId,
-        message,
-        response: finalAnswer,
-        mode: 'text'
-      });
+    // 5. Log chat interaction to database
+    await supabase.from('chat_logs').insert([
+      {
+        user_id: userId,
+        message: message,
+        role: 'user',
+        language: profile.preferred_language || 'hi'
+      },
+      {
+        user_id: userId,
+        message: finalAnswer,
+        role: 'assistant',
+        language: profile.preferred_language || 'hi'
+      }
+    ]);
 
     return NextResponse.json({ response: finalAnswer });
 
