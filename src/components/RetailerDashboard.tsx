@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { formatIndianCurrency } from '@/lib/format';
+import { adminCreateCustomer } from '@/app/actions/auth';
 import LedgerHistory from './LedgerHistory';
 import { Search, UserPlus, PlusCircle, ArrowUpRight, ArrowDownLeft, X, ArrowLeft, Phone, User, Store } from 'lucide-react';
 
@@ -120,35 +121,36 @@ export default function RetailerDashboard({ profile }: RetailerDashboardProps) {
       let customerId = existingProfile?.id;
 
       if (!customerId) {
-        // Since Supabase has a foreign key public.profiles.id -> auth.users.id, 
-        // to support un-registered customers manually added by retailers,
-        // we insert a customer row. Wait! In Phase 2 public.profiles:
-        // id references auth.users(id).
-        // Since we can't create auth users directly on the client side, we create a fallback entry.
-        // Wait, if RLS / constraint prevents it, let's see. In our updated public.profiles schema:
-        // id references auth.users(id) on delete cascade.
-        // Oh! If the constraint is enforced, a user MUST exist in auth.users.
-        // In local setups, since we don't have an auth user for this customer, what should we do?
-        // We can create a mock auth user using the signup API or we can just try to insert.
-        // Wait, we can sign up the customer as a dummy or we can catch and insert.
-        // Actually, to make it bulletproof in the client, let's signup a dummy customer using Supabase:
-        const dummyEmail = `customer_${custPhone}@gmail.com`;
-        const dummyPassword = `Pass_${custPhone}`;
+        // Create the customer using admin server action to bypass email rate limits
+        const res = await adminCreateCustomer(custName, formattedPhone);
         
-        // Attempt signup
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email: dummyEmail,
-          password: dummyPassword,
-          options: {
-            data: {
-              full_name: custName,
-              phone: formattedPhone
-            }
-          }
-        });
+        if (!res.success) {
+          // If SERVICE_ROLE_KEY_MISSING, fallback to the client-side signUp
+          if (res.error === 'SERVICE_ROLE_KEY_MISSING') {
+            console.warn('SUPABASE_SERVICE_ROLE_KEY is missing on server. Falling back to client-side signup.');
+            
+            const dummyEmail = `customer_${custPhone}@gmail.com`;
+            const dummyPassword = `Pass_${custPhone}`;
+            
+            const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+              email: dummyEmail,
+              password: dummyPassword,
+              options: {
+                data: {
+                  full_name: custName,
+                  phone: formattedPhone
+                }
+              }
+            });
 
-        if (signUpError) throw signUpError;
-        customerId = signUpData.user?.id;
+            if (signUpError) throw signUpError;
+            customerId = signUpData.user?.id;
+          } else {
+            throw new Error(res.error);
+          }
+        } else {
+          customerId = res.userId;
+        }
 
         // Note: The auth trigger usually inserts into profiles. If not, we insert it manually:
         if (customerId) {

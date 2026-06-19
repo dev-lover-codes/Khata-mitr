@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export async function signInWithPhone(phone: string) {
   try {
@@ -102,3 +103,44 @@ export async function signOut() {
   await supabase.auth.signOut();
   return { success: true };
 }
+
+export async function adminCreateCustomer(name: string, phone: string) {
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+    if (!serviceRoleKey) {
+      return { success: false, error: 'SERVICE_ROLE_KEY_MISSING' };
+    }
+
+    const adminClient = createSupabaseClient(supabaseUrl, serviceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    });
+
+    const cleanPhone = phone.replace('+', '');
+    const dummyEmail = `customer_${cleanPhone}@gmail.com`;
+    const dummyPassword = `Pass_${cleanPhone}`;
+
+    const { data, error } = await adminClient.auth.admin.createUser({
+      email: dummyEmail,
+      password: dummyPassword,
+      email_confirm: true, // auto-confirms email so no verification email is sent!
+      user_metadata: {
+        full_name: name,
+        phone: phone
+      }
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, userId: data.user?.id };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown admin auth error' };
+  }
+}
+
