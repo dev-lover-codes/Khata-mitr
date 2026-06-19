@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function signInWithPhone(phone: string) {
   try {
@@ -106,19 +106,12 @@ export async function signOut() {
 
 export async function adminCreateCustomer(name: string, phone: string) {
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-
-    if (!serviceRoleKey) {
+    let adminClient;
+    try {
+      adminClient = createAdminClient();
+    } catch {
       return { success: false, error: 'SERVICE_ROLE_KEY_MISSING' };
     }
-
-    const adminClient = createSupabaseClient(supabaseUrl, serviceRoleKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    });
 
     const cleanPhone = phone.replace('+', '');
     const dummyEmail = `customer_${cleanPhone}@gmail.com`;
@@ -156,6 +149,62 @@ export async function adminCreateCustomer(name: string, phone: string) {
     return { success: true, userId: data.user?.id };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown admin auth error' };
+  }
+}
+
+export async function findProfileByPhone(phone: string) {
+  try {
+    const adminClient = createAdminClient();
+    const { data, error } = await adminClient
+      .from('profiles')
+      .select('id')
+      .eq('phone', phone)
+      .maybeSingle();
+
+    if (error) throw error;
+    return { success: true, profile: data };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function fetchRetailerRelationships(retailerId: string) {
+  try {
+    const adminClient = createAdminClient();
+    const { data, error } = await adminClient
+      .from('relationships')
+      .select(`
+        id,
+        customer_id,
+        balance,
+        customer:profiles!customer_id(full_name, phone)
+      `)
+      .eq('retailer_id', retailerId);
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function fetchCustomerRelationships(customerId: string) {
+  try {
+    const adminClient = createAdminClient();
+    const { data, error } = await adminClient
+      .from('relationships')
+      .select(`
+        id,
+        retailer_id,
+        balance,
+        retailer:profiles!retailer_id(full_name, phone, business_name)
+      `)
+      .eq('customer_id', customerId);
+
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 

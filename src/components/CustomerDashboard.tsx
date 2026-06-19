@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { formatIndianCurrency } from '@/lib/format';
+import { fetchCustomerRelationships } from '@/app/actions/auth';
 import LedgerHistory from './LedgerHistory';
 import { Store, ArrowLeft, Phone, User } from 'lucide-react';
 
@@ -30,7 +30,6 @@ interface CustomerDashboardProps {
 }
 
 export default function CustomerDashboard({ profile }: CustomerDashboardProps) {
-  const supabase = createClient();
   const lang = profile.preferred_language || 'hi';
 
   const [relationships, setRelationships] = useState<RetailerRelationship[]>([]);
@@ -39,21 +38,12 @@ export default function CustomerDashboard({ profile }: CustomerDashboardProps) {
 
   // Fetch all customer-retailer relationships
   async function fetchRelationships() {
-    await Promise.resolve();
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('relationships')
-        .select(`
-          id,
-          retailer_id,
-          balance,
-          retailer:profiles!retailer_id(full_name, phone, business_name)
-        `)
-        .eq('customer_id', profile.id);
+      const res = await fetchCustomerRelationships(profile.id);
+      if (!res.success) throw new Error(res.error);
 
-      if (error) throw error;
-      const formattedData = (data as unknown) as RetailerRelationship[];
+      const formattedData = (res.data as unknown) as RetailerRelationship[];
       setRelationships(formattedData || []);
 
       // If a retailer is selected, update it

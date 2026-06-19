@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { formatIndianCurrency } from '@/lib/format';
-import { adminCreateCustomer } from '@/app/actions/auth';
+import { adminCreateCustomer, findProfileByPhone, fetchRetailerRelationships } from '@/app/actions/auth';
 import LedgerHistory from './LedgerHistory';
 import { Search, UserPlus, PlusCircle, ArrowUpRight, ArrowDownLeft, X, ArrowLeft, Phone, User, Store } from 'lucide-react';
 
@@ -56,21 +56,12 @@ export default function RetailerDashboard({ profile }: RetailerDashboardProps) {
 
   // Fetch all retailer-customer relationships
   async function fetchRelationships() {
-    await Promise.resolve();
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('relationships')
-        .select(`
-          id,
-          customer_id,
-          balance,
-          customer:profiles!customer_id(full_name, phone)
-        `)
-        .eq('retailer_id', profile.id);
-
-      if (error) throw error;
-      const formattedData = (data as unknown) as CustomerRelationship[];
+      const res = await fetchRetailerRelationships(profile.id);
+      if (!res.success) throw new Error(res.error);
+      
+      const formattedData = (res.data as unknown) as CustomerRelationship[];
       setRelationships(formattedData || []);
 
       // If a customer was selected, update its current data too
@@ -112,13 +103,9 @@ export default function RetailerDashboard({ profile }: RetailerDashboardProps) {
       const formattedPhone = `+91${custPhone}`;
 
       // 1. Check if customer profile already exists in public.profiles
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('phone', formattedPhone)
-        .single();
-
-      let customerId = existingProfile?.id;
+      const checkRes = await findProfileByPhone(formattedPhone);
+      if (!checkRes.success) throw new Error(checkRes.error);
+      let customerId = checkRes.profile?.id;
 
       if (!customerId) {
         // Create the customer using admin server action to bypass email rate limits
