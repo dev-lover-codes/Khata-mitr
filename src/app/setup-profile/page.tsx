@@ -281,7 +281,7 @@ export default function SetupProfilePage() {
                 <select
                   value={businessCategory}
                   onChange={(e) => setBusinessCategory(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/20 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all text-zinc-800 dark:text-zinc-200"
+                  className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all text-zinc-800 dark:text-zinc-200 [color-scheme:light] dark:[color-scheme:dark]"
                 >
                   <option value="">{language === 'hi' ? 'श्रेणी चुनें' : 'Select Category'}</option>
                   <option value="Kirana / Grocery">{language === 'hi' ? 'किराना / किराना दुकान' : 'Kirana / Grocery'}</option>

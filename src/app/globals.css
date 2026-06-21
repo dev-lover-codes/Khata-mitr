@@ -59,3 +59,25 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* Global Select and Option Browser Color-Scheme Overrides for Dark Mode */
+select {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  select {
+    color-scheme: dark !important;
+  }
+  select option {
+    background-color: #121218 !important; /* Sleek dark-mode background matching workspace */
+    color: #f4f4f5 !important;
+  }
+  select option:hover,
+  select option:focus,
+  select option:active {
+    background-color: #27272a !important; /* Smooth hover transition background */
+    color: #ffffff !important;
+  }
+}
+

@@ -829,7 +829,7 @@ export default function RetailerDashboard({ profile }: RetailerDashboardProps) {
                 <select
                   value={shopCategory}
                   onChange={(e) => setShopCategory(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/20 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                  className="w-full px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none [color-scheme:light] dark:[color-scheme:dark]"
                 >
                   <option value="">Select Category</option>
                   <option value="Kirana / Grocery">Kirana / Grocery</option>
