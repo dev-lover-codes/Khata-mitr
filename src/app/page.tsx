@@ -7,7 +7,7 @@ import { translations } from '@/lib/translations';
 import { Language } from '@/types';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import LanguageToggle from '@/components/LanguageToggle';
-import { signUpWithEmail, signInWithGoogle } from '@/app/actions/auth';
+import { signUpWithEmail } from '@/app/actions/auth';
 import { BookOpen, ArrowRight, Sparkles, Shield, AlertCircle, Lock, Mail, Loader2 } from 'lucide-react';
 import { Session } from '@supabase/supabase-js';
 
@@ -28,8 +28,10 @@ export default function Home() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
 
   // Fetch profiles table record
   const fetchProfile = useCallback(async (userId: string) => {
@@ -87,15 +89,51 @@ export default function Home() {
   // Handle Google OAuth Auth Flow
   const handleGoogleAuth = async () => {
     setAuthError(null);
+    setAuthSuccess(null);
     setIsLoading(true);
     try {
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      const res = await signInWithGoogle(origin);
-      if (res && !res.success) {
-        setAuthError(res.error || 'Google login failed.');
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${origin}/auth/callback`,
+        },
+      });
+      if (error) {
+        setAuthError(error.message || 'Google login failed.');
+        setIsLoading(false);
       }
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : 'Google login failed.');
+      setIsLoading(false);
+    }
+  };
+
+  // Handle Forgot Password Reset Link Request
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) {
+      setAuthError(language === 'hi' ? 'ईमेल आवश्यक है।' : 'Email is required.');
+      return;
+    }
+
+    setAuthError(null);
+    setAuthSuccess(null);
+    setIsLoading(true);
+
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${origin}/auth/callback?next=/reset-password`,
+      });
+
+      if (error) {
+        setAuthError(error.message);
+      } else {
+        setAuthSuccess(t.resetLinkSent);
+      }
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Failed to send reset link.');
     } finally {
       setIsLoading(false);
     }
@@ -114,13 +152,14 @@ export default function Home() {
     }
 
     setAuthError(null);
+    setAuthSuccess(null);
     setIsLoading(true);
 
     try {
       if (isSignUp) {
         const res = await signUpWithEmail(email, password);
         if (res.success) {
-          setAuthError(
+          setAuthSuccess(
             language === 'hi'
               ? 'खाता बनाया गया है! यदि ईमेल सत्यापन सक्षम है, तो कृपया अपनी ईमेल की जांच करें, अन्यथा सीधे लॉग इन करें।'
               : 'Account created! If email confirmation is enabled, please verify your email; otherwise, sign in directly.'
@@ -204,37 +243,17 @@ export default function Home() {
             </div>
           )}
 
-          <div className="space-y-4">
-            {/* Google Sign-in Button */}
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={handleGoogleAuth}
-              className="w-full py-3.5 px-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white hover:bg-zinc-50 dark:bg-zinc-900/30 dark:hover:bg-zinc-900/50 text-zinc-700 dark:text-zinc-200 font-bold flex items-center justify-center gap-2 shadow-sm hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer disabled:opacity-60"
-            >
-              {isLoading ? (
-                <Loader2 className="h-5 w-5 animate-spin text-zinc-400" />
-              ) : (
-                <svg className="h-5 w-5 mr-1 shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
-                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
-                </svg>
-              )}
-              <span>{t.signInWithGoogle}</span>
-            </button>
-
-            {/* Divider */}
-            <div className="flex items-center my-4">
-              <div className="flex-1 border-t border-zinc-200 dark:border-zinc-800"></div>
-              <span className="px-3 text-xs font-bold text-zinc-400 uppercase tracking-widest">{t.orDivider}</span>
-              <div className="flex-1 border-t border-zinc-200 dark:border-zinc-800"></div>
+          {authSuccess && (
+            <div className="p-3 mb-4 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/50 rounded-xl flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+              <Sparkles className="h-4 w-4 shrink-0 text-emerald-500" />
+              <span>{authSuccess}</span>
             </div>
+          )}
 
-            {/* Email/Password Form */}
-            <form onSubmit={handleEmailAuth} className="space-y-4">
-              <div className="space-y-3">
+          <div className="space-y-4">
+            {isForgotPassword ? (
+              /* Forgot Password Form */
+              <form onSubmit={handleForgotPassword} className="space-y-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
                     {t.emailLabel}
@@ -252,53 +271,150 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
-                    {t.passwordLabel}
-                  </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder={t.passwordPlaceholder}
-                      className="w-full pl-10 pr-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/20 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all text-zinc-800 dark:text-zinc-200"
-                      minLength={6}
-                      required
-                    />
-                  </div>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-brand-600 to-violet-600 hover:from-brand-500 hover:to-violet-500 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-brand-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60 mt-2"
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <>
+                      <span>{t.sendResetLink}</span>
+                      <ArrowRight className="h-5 w-5" />
+                    </>
+                  )}
+                </button>
+
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsForgotPassword(false);
+                      setAuthError(null);
+                      setAuthSuccess(null);
+                    }}
+                    className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline cursor-pointer"
+                  >
+                    {t.backToSignIn}
+                  </button>
                 </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-brand-600 to-violet-600 hover:from-brand-500 hover:to-violet-500 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-brand-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60 mt-2"
-              >
-                {isLoading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  <>
-                    <span>{isSignUp ? t.signUpButton : t.signInButton}</span>
-                    <ArrowRight className="h-5 w-5" />
-                  </>
-                )}
-              </button>
-
-              <div className="text-center pt-2">
+              </form>
+            ) : (
+              /* Regular Auth (Google + Email/Password) */
+              <>
+                {/* Google Sign-in Button */}
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsSignUp(!isSignUp);
-                    setAuthError(null);
-                  }}
-                  className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline cursor-pointer"
+                  disabled={isLoading}
+                  onClick={handleGoogleAuth}
+                  className="w-full py-3.5 px-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white hover:bg-zinc-50 dark:bg-zinc-900/30 dark:hover:bg-zinc-900/50 text-zinc-700 dark:text-zinc-200 font-bold flex items-center justify-center gap-2 shadow-sm hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer disabled:opacity-60"
                 >
-                  {isSignUp ? t.alreadyHaveAccount : t.dontHaveAccount}
+                  {isLoading ? (
+                    <Loader2 className="h-5 w-5 animate-spin text-zinc-400" />
+                  ) : (
+                    <svg className="h-5 w-5 mr-1 shrink-0" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                    </svg>
+                  )}
+                  <span>{t.signInWithGoogle}</span>
                 </button>
-              </div>
-            </form>
+
+                {/* Divider */}
+                <div className="flex items-center my-4">
+                  <div className="flex-1 border-t border-zinc-200 dark:border-zinc-800"></div>
+                  <span className="px-3 text-xs font-bold text-zinc-400 uppercase tracking-widest">{t.orDivider}</span>
+                  <div className="flex-1 border-t border-zinc-200 dark:border-zinc-800"></div>
+                </div>
+
+                {/* Email/Password Form */}
+                <form onSubmit={handleEmailAuth} className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                        {t.emailLabel}
+                      </label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder={t.emailPlaceholder}
+                          className="w-full pl-10 pr-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/20 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all text-zinc-800 dark:text-zinc-200"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                          {t.passwordLabel}
+                        </label>
+                        {!isSignUp && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsForgotPassword(true);
+                              setAuthError(null);
+                              setAuthSuccess(null);
+                            }}
+                            className="text-xs font-bold text-brand-600 dark:text-brand-400 hover:underline cursor-pointer"
+                          >
+                            {t.forgotPasswordLink}
+                          </button>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
+                        <input
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          placeholder={t.passwordPlaceholder}
+                          className="w-full pl-10 pr-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/20 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all text-zinc-800 dark:text-zinc-200"
+                          minLength={6}
+                          required
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-brand-600 to-violet-600 hover:from-brand-500 hover:to-violet-500 text-white font-bold flex items-center justify-center gap-2 shadow-lg shadow-brand-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer disabled:opacity-60 mt-2"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    ) : (
+                      <>
+                        <span>{isSignUp ? t.signUpButton : t.signInButton}</span>
+                        <ArrowRight className="h-5 w-5" />
+                      </>
+                    )}
+                  </button>
+
+                  <div className="text-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsSignUp(!isSignUp);
+                        setAuthError(null);
+                        setAuthSuccess(null);
+                      }}
+                      className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline cursor-pointer"
+                    >
+                      {isSignUp ? t.alreadyHaveAccount : t.dontHaveAccount}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
 
           {/* Core App Features Info */}

@@ -73,3 +73,10 @@
 - [x] **Step 30**: Create Next.js proxy file at `src/proxy.ts` to ensure session persistence and token refresh are properly executed on every route request.
 - [x] **Step 31**: Update the `signUpWithEmail` server action in `src/app/actions/auth.ts` to use `createAdminClient` to register new users with `email_confirm: true` by default, bypassing email verification loops in the test/development environment.
 - [x] **Step 32**: Update the login handler in `src/app/page.tsx` to sign in on the client side using the browser Supabase client (or call `supabase.auth.setSession`), ensuring immediate auth listener execution and dashboard redirects.
+- [x] **Step 33**: Resolve the UX issue where the account creation success message is stored in the `authError` state and displayed as a red error alert. Introduce a new `authSuccess` state to handle success messages and render them as an elegant green notification banner with a Sparkles icon.
+- [x] **Step 34**: Update `src/lib/translations.ts` to add translation strings for Forgot Password and Reset Password features in English and Hindi.
+- [x] **Step 35**: Update `src/app/auth/callback/route.ts` to handle the `next` search parameter and redirect the user accordingly.
+- [x] **Step 36**: Modify `src/app/page.tsx` to handle Google Sign-in on the client side using the browser Supabase client to fix the `NEXT_REDIRECT` error display.
+- [x] **Step 37**: Implement the Forgot Password form toggle and email link request handler in `src/app/page.tsx`.
+- [x] **Step 38**: Create the bilingual `/src/app/reset-password/page.tsx` page to handle password updating.
+
