@@ -115,7 +115,7 @@ export default function SetupProfilePage() {
               : 'This mobile number is already registered with another account.'
           );
         }
-        throw error;
+        throw new Error(error.message);
       }
 
       // Successfully saved, navigate to the correct dashboard page
@@ -125,7 +125,12 @@ export default function SetupProfilePage() {
         router.push('/customer');
       }
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Error creating profile';
+      let errMsg = 'Error creating profile';
+      if (err instanceof Error) {
+        errMsg = err.message;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        errMsg = String(err.message);
+      }
       setErrorMessage(errMsg);
     } finally {
       setIsLoading(false);
