@@ -7,8 +7,7 @@ import { translations } from '@/lib/translations';
 import { Language } from '@/types';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import LanguageToggle from '@/components/LanguageToggle';
-import { signUpWithEmail } from '@/app/actions/auth';
-import { BookOpen, ArrowRight, Sparkles, Shield, AlertCircle, Lock, Mail, Loader2 } from 'lucide-react';
+import { BookOpen, ArrowRight, Sparkles, Shield, AlertCircle, Lock, Mail, Loader2, User } from 'lucide-react';
 import { Session } from '@supabase/supabase-js';
 
 
@@ -27,6 +26,9 @@ export default function Home() {
   // Form inputs & login flow state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [agreeTerms, setAgreeTerms] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -151,22 +153,50 @@ export default function Home() {
       return;
     }
 
+    if (isSignUp) {
+      if (!fullName) {
+        setAuthError(language === 'hi' ? 'नाम आवश्यक है।' : 'Name is required.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setAuthError(language === 'hi' ? 'पासवर्ड मेल नहीं खाते।' : 'Passwords do not match.');
+        return;
+      }
+      if (!agreeTerms) {
+        setAuthError(language === 'hi' ? 'नियम और शर्तें स्वीकार करना आवश्यक है।' : 'You must accept the Terms and Conditions.');
+        return;
+      }
+    }
+
     setAuthError(null);
     setAuthSuccess(null);
     setIsLoading(true);
 
     try {
       if (isSignUp) {
-        const res = await signUpWithEmail(email, password);
-        if (res.success) {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: fullName,
+            },
+          },
+        });
+        if (error) {
+          setAuthError(error.message || 'Signup failed.');
+        } else {
           setAuthSuccess(
             language === 'hi'
               ? 'खाता बनाया गया है! यदि ईमेल सत्यापन सक्षम है, तो कृपया अपनी ईमेल की जांच करें, अन्यथा सीधे लॉग इन करें।'
               : 'Account created! If email confirmation is enabled, please verify your email; otherwise, sign in directly.'
           );
-          setIsSignUp(false);
-        } else {
-          setAuthError(res.error || 'Signup failed.');
+          if (data.session) {
+            router.push('/setup-profile');
+            router.refresh();
+          } else {
+            setIsSignUp(false);
+          }
         }
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -333,6 +363,27 @@ export default function Home() {
                 {/* Email/Password Form */}
                 <form onSubmit={handleEmailAuth} className="space-y-4">
                   <div className="space-y-3">
+                    {/* Full Name field (Signup only) */}
+                    {isSignUp && (
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                          {language === 'hi' ? 'पूरा नाम' : 'Full Name'}
+                        </label>
+                        <div className="relative">
+                          <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
+                          <input
+                            type="text"
+                            value={fullName}
+                            onChange={(e) => setFullName(e.target.value)}
+                            placeholder={language === 'hi' ? 'अपना नाम दर्ज करें' : 'Enter your name'}
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/20 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 transition-all text-zinc-800 dark:text-zinc-200"
+                            required={isSignUp}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Email field (Always) */}
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
                         {t.emailLabel}
@@ -350,6 +401,7 @@ export default function Home() {
                       </div>
                     </div>
 
+                    {/* Password field (Always) */}
                     <div className="space-y-1">
                       <div className="flex justify-between items-center">
                         <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
@@ -363,7 +415,7 @@ export default function Home() {
                               setAuthError(null);
                               setAuthSuccess(null);
                             }}
-                            className="text-xs font-bold text-brand-600 dark:text-brand-400 hover:underline cursor-pointer"
+                            className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline cursor-pointer"
                           >
                             {t.forgotPasswordLink}
                           </button>
@@ -382,6 +434,47 @@ export default function Home() {
                         />
                       </div>
                     </div>
+
+                    {/* Confirm Password field (Signup only) */}
+                    {isSignUp && (
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-zinc-500 dark:text-zinc-400">
+                          {language === 'hi' ? 'पासवर्ड की पुष्टि करें' : 'Confirm Password'}
+                        </label>
+                        <div className="relative">
+                          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 pointer-events-none" />
+                          <input
+                            type="password"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            placeholder="••••••••"
+                            className="w-full pl-10 pr-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/20 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-zinc-800 dark:text-zinc-200"
+                            required={isSignUp}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Terms and Conditions checkbox (Signup only) */}
+                    {isSignUp && (
+                      <div className="flex items-start pt-1">
+                        <div className="flex items-center h-5">
+                          <input
+                            id="page-agree-terms"
+                            type="checkbox"
+                            checked={agreeTerms}
+                            onChange={(e) => setAgreeTerms(e.target.checked)}
+                            required={isSignUp}
+                            className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-800 bg-[#070A0F] text-brand-600 focus:ring-brand-500 cursor-pointer accent-brand-600"
+                          />
+                        </div>
+                        <div className="ml-2.5 text-xs">
+                          <label htmlFor="page-agree-terms" className="block text-zinc-500 dark:text-zinc-400 cursor-pointer select-none">
+                            {language === 'hi' ? 'मैं नियमों और शर्तों को स्वीकार करता हूँ' : 'I accept the Terms and Conditions'}
+                          </label>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <button

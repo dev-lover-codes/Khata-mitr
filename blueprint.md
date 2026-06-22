@@ -97,6 +97,10 @@
 - [x] **Step 54**: Fix backward compatibility issue in `/api/assistant/route.ts` where older cached clients might send `message` payload directly instead of `inputType`, preventing `"Invalid option: expected one of 'text'|'audio'"` error.
 - [x] **Step 55**: Add "Confirm Password" input field to registration page `/src/app/signup/page.tsx` with proper layout order and validation check.
 - [x] **Step 56**: Execute linting, compilation test, stage, commit and push changes.
+- [x] **Step 57**: Update the embedded signup panel on the main landing page `src/app/page.tsx` (when `isSignUp` is true) to include the redesigned registration layout: Full Name, Email, Password, Confirm Password, and Terms & Conditions.
+- [x] **Step 58**: Run lint checks and build verification to ensure no errors.
+- [x] **Step 59**: Execute Git commit and push command.
+
 
 
 
