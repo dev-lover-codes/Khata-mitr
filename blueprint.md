@@ -89,4 +89,10 @@
 - [x] **Step 46**: Create `/src/app/signup/page.tsx` client component featuring matching styling, user metadata field, and integration with `supabase.auth.signUp`.
 - [x] **Step 47**: Perform automated build and lint checks (`npm run lint` and checking compilation).
 - [x] **Step 48**: Execute Git commit and push command to synchronize changes.
+- [x] **Step 49**: Refactor backend assistant API controller `/src/app/api/assistant/route.ts` to support dual-mode (Text + Voice) and bilingually instruct Gemini with the specified 3-step operational mandate.
+- [x] **Step 50**: Create the frontend `src/components/ChatInput.tsx` client component featuring a Mode Switcher toggle, auto-resizing textarea, native MediaRecorder voice capturing, and standardized payload dispatching.
+- [x] **Step 51**: Integrate `ChatInput.tsx` into `src/components/ChatAssistant.tsx` to replace the old footer input and verify bilinguality / speech synthesis options.
+- [x] **Step 52**: Verify build compilation and run linting checks.
+- [x] **Step 53**: Commit and push the changes to Git.
+
 

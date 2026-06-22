@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { X, Send, Sparkles, Trash2, Bot, User, Loader2, Mic, MicOff } from 'lucide-react';
+import { X, Sparkles, Trash2, Bot, User, Loader2 } from 'lucide-react';
+import ChatInput from '@/components/ChatInput';
 
 interface ChatAssistantProps {
   profile: {
@@ -26,16 +27,10 @@ export default function ChatAssistant({ profile }: ChatAssistantProps) {
 
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Voice recording state
-  const [isRecording, setIsRecording] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
-  const recordingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const lang = profile.preferred_language;
 
@@ -93,15 +88,6 @@ export default function ChatAssistant({ profile }: ChatAssistantProps) {
     loadHistory();
   }, [isOpen, profile.id, supabase, messages.length]);
 
-  // Clean up recording states on unmount
-  useEffect(() => {
-    return () => {
-      if (recordingTimeoutRef.current) {
-        clearTimeout(recordingTimeoutRef.current);
-      }
-    };
-  }, []);
-
   // Text-To-Speech voice feedback
   const speakText = (textToSpeak: string) => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -119,156 +105,6 @@ export default function ChatAssistant({ profile }: ChatAssistantProps) {
     }
   };
 
-  // Start voice input capture
-  const startRecording = async () => {
-    if (isLoading) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = async () => {
-          const base64Audio = (reader.result as string).split(',')[1];
-          await sendVoiceMessage(base64Audio);
-        };
-        stream.getTracks().forEach((track) => track.stop());
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-      setErrorMsg(null);
-
-      // Enforce 10 seconds limit automatically
-      recordingTimeoutRef.current = setTimeout(() => {
-        stopRecording();
-      }, 10000);
-    } catch (err) {
-      console.error('Error starting recording:', err);
-      setErrorMsg(lang === 'hi' ? 'माइक्रोफ़ोन अनुमति अस्वीकृत या उपलब्ध नहीं है।' : 'Microphone permission denied or unavailable.');
-    }
-  };
-
-  // Stop voice input capture
-  const stopRecording = () => {
-    if (recordingTimeoutRef.current) {
-      clearTimeout(recordingTimeoutRef.current);
-      recordingTimeoutRef.current = null;
-    }
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-    setIsRecording(false);
-  };
-
-  // POST captured base64 audio data
-  const sendVoiceMessage = async (base64Audio: string) => {
-    if (isLoading) return;
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: lang === 'hi' ? '[आवाज संदेश भेजा गया]' : '[Voice Message Sent]',
-    };
-    const historyPayload = messages.map(m => ({ role: m.role, content: m.content }));
-    setMessages((prev) => [...prev, userMessage]);
-    setIsLoading(true);
-
-    try {
-      const response = await fetch('/api/voice-assistant', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          audio: base64Audio,
-          mimeType: 'audio/wav',
-          userId: profile.id,
-          history: historyPayload,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Server responded with an error');
-      }
-
-      const assistantMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: data.response,
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      speakText(data.response);
-    } catch (err) {
-      console.error('Error in voice chat:', err);
-      setErrorMsg(err instanceof Error ? err.message : 'Something went wrong with voice processing.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Handle message send
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
-
-    const userMessageText = input.trim();
-    const historyPayload = messages.map(m => ({ role: m.role, content: m.content }));
-    setInput('');
-    setErrorMsg(null);
-
-    // Add user message locally
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: userMessageText,
-    };
-    setMessages((prev) => [...prev, userMessage]);
-    setIsLoading(true);
-
-    try {
-      const response = await fetch('/api/assistant', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: userMessageText,
-          userId: profile.id,
-          history: historyPayload,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Server responded with an error');
-      }
-
-      const assistantMessage: Message = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: data.response,
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
-      speakText(data.response);
-    } catch (err) {
-      console.error('Error in chat:', err);
-      setErrorMsg(err instanceof Error ? err.message : 'Something went wrong.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   // Clear chat logs
   const handleClearChat = async () => {
@@ -413,45 +249,35 @@ export default function ChatAssistant({ profile }: ChatAssistantProps) {
                 {errorMsg}
               </div>
             )}
-            <div className="flex gap-2 items-center">
-              
-              {/* Mic Icon Button */}
-              <button
-                type="button"
-                onClick={isRecording ? stopRecording : startRecording}
-                disabled={isLoading}
-                title={isRecording ? 'Recording... click to stop' : 'Record voice message (max 10s)'}
-                className={`h-8.5 w-8.5 rounded-xl border flex items-center justify-center transition-all cursor-pointer ${
-                  isRecording 
-                    ? 'bg-red-500 border-red-600 text-white animate-pulse'
-                    : 'bg-zinc-50 hover:bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400'
-                }`}
-              >
-                {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-              </button>
-
-              <form onSubmit={handleSend} className="flex-1 flex gap-2">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  disabled={isLoading || isRecording}
-                  placeholder={isRecording ? 'Listening/सुन रहा हूँ (max 10s)...' : text.placeholder}
-                  className="flex-1 px-3 py-2 text-xs border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50/50 dark:bg-zinc-900/30 text-zinc-800 dark:text-zinc-100 focus:outline-none focus:ring-1.5 focus:ring-brand-500 transition-all disabled:opacity-60"
-                />
-                <button
-                  type="submit"
-                  disabled={isLoading || !input.trim() || isRecording}
-                  className="h-8.5 w-8.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white flex items-center justify-center shadow transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                >
-                  {isLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </button>
-              </form>
-            </div>
+            <ChatInput
+              userId={profile.id}
+              history={messages.map(m => ({ role: m.role, content: m.content }))}
+              isLoading={isLoading}
+              onStartLoading={() => {
+                setIsLoading(true);
+                setErrorMsg(null);
+              }}
+              onResponseReceived={(userMsgText, assistantResponse) => {
+                const userMessage: Message = {
+                  id: crypto.randomUUID(),
+                  role: 'user',
+                  content: userMsgText,
+                };
+                const assistantMessage: Message = {
+                  id: crypto.randomUUID(),
+                  role: 'assistant',
+                  content: assistantResponse,
+                };
+                setMessages((prev) => [...prev, userMessage, assistantMessage]);
+                setIsLoading(false);
+                speakText(assistantResponse);
+              }}
+              onError={(error) => {
+                setErrorMsg(error);
+                setIsLoading(false);
+              }}
+              preferredLanguage={profile.preferred_language}
+            />
           </footer>
         </div>
       )}

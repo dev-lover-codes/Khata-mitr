@@ -4,8 +4,13 @@ import { createClient } from '@/lib/supabase/server';
 import { z } from 'zod';
 
 const requestSchema = z.object({
-  message: z.string().min(1, 'Message is required'),
   userId: z.string().uuid('Invalid user ID'),
+  inputType: z.enum(['text', 'audio']),
+  textPayload: z.string().optional(),
+  audioPayload: z.object({
+    mimeType: z.string(),
+    base64Data: z.string()
+  }).optional(),
   history: z.array(
     z.object({
       role: z.enum(['user', 'assistant']),
@@ -32,7 +37,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: parseResult.error.issues[0].message }, { status: 400 });
     }
 
-    const { message, userId, history = [] } = parseResult.data;
+    const { userId, inputType, textPayload, audioPayload, history = [] } = parseResult.data;
 
     const supabase = await createClient();
 
@@ -87,26 +92,52 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. System Prompt and Instructions
-    const systemInstruction = `You are KhataMitra, a friendly, concise, and helpful financial assistant for Indian shopkeepers (retailers) and customers.
-You support interactions in Hindi (हिंदी), English, and Hinglish (Hindi written in Latin script, e.g., "Ramu ko 200 rupaye udhaar").
-Your current user profile context is:
-${contextInfo}
-Current Time: ${new Date().toISOString()}
+    // 3. Dynamic Contents construction and Master Bilingual System Instruction
+    const systemInstruction = `You are DukaanBook’s native Indian shopkeeper AI Agent. You will receive input as either written text or a raw voice audio recording. The shopkeeper will speak or type in pure English, pure Hindi (Devanagari script), or Roman Hinglish.
+Your operational mandate is strictly 3 steps:
+Step 1: Listen to the audio or read the text, and deduce the core ledger intent, regardless of grammar or slang.
+Step 2: Autonomously call the required database tools (e.g., create_profile, add_transaction).
+Step 3: Once the database returns success, analyze the EXACT language and script the shopkeeper used to communicate with you, and reply back to them in that exact same tongue. If they spoke Roman Hinglish ("Ramesh ka 500 likho"), reply in clean Roman Hinglish ("Ramesh ke account me ₹500 likh diye hain"). If they used Devanagari Hindi, reply in Devanagari Hindi.
 
-Operational Guidelines:
-1. NEVER invent or hallucinate balances, customer names, or transaction histories. Always call the relevant database tools first to query or record data.
-2. Trust tool results completely. If a tool reports a balance of ₹500, state it exactly. If a transaction succeeds, confirm it.
-3. Be polite and concise. Indian shopkeepers value quick, clear answers without excessive fluff.
-4. Answer in the language preferred by the user, or use Hinglish if they talk in Hinglish.
-5. If the user asks about a customer or retailer not in their list, inform them politely that the connection or customer does not exist in their active database yet.
-6. When recording or querying ledger items, invoke the matching function declaration.`;
+Here is the current user profile context for your database operations:
+${contextInfo}
+Current Time: ${new Date().toISOString()}`;
+
+    // Determine the user prompt part for Gemini
+    let userPart:
+      | { text: string }
+      | { inlineData: { mimeType: string; data: string } };
+    let loggedUserMessage = '';
+
+    if (inputType === 'text') {
+      if (textPayload === undefined) {
+        return NextResponse.json({ error: 'textPayload is required when inputType is "text"' }, { status: 400 });
+      }
+      userPart = { text: textPayload };
+      loggedUserMessage = textPayload;
+    } else {
+      if (!audioPayload) {
+        return NextResponse.json({ error: 'audioPayload is required when inputType is "audio"' }, { status: 400 });
+      }
+      userPart = {
+        inlineData: {
+          mimeType: audioPayload.mimeType,
+          data: audioPayload.base64Data
+        }
+      };
+      loggedUserMessage = '[Voice Message / आवाज़ संदेश]';
+    }
+
+    const userContentPart = {
+      role: 'user',
+      parts: [userPart]
+    };
 
     const model = 'gemini-2.0-flash';
     const prunedHistory = pruneHistory(history);
     const response = await generateContentWithRetry({
       model,
-      contents: [...prunedHistory, { role: 'user', parts: [{ text: message }] }],
+      contents: [...prunedHistory, userContentPart],
       config: {
         systemInstruction,
         tools: [{ functionDeclarations: khataMitraTools }]
@@ -299,7 +330,7 @@ Operational Guidelines:
         model,
         contents: [
           ...prunedHistory,
-          { role: 'user', parts: [{ text: message }] },
+          userContentPart,
           { role: 'model', parts: [{ functionCall: call }] },
           { role: 'user', parts: [{ functionResponse: { name, response: toolResponse } }] }
         ],
@@ -315,7 +346,7 @@ Operational Guidelines:
     await supabase.from('chat_logs').insert([
       {
         user_id: userId,
-        message: message,
+        message: loggedUserMessage,
         role: 'user',
         language: profile.preferred_language || 'hi'
       },
