@@ -84,6 +84,9 @@
 - [x] **Step 41**: Register the `add_inventory_item` tool definition in `src/lib/gemini.ts` and wire its execution in `src/app/api/assistant/route.ts`.
 - [x] **Step 42**: Create the bilingual frontend panel `src/components/StationeryManager.tsx` with inventory tracking, low-stock alerts, and a counter sales billing form.
 - [x] **Step 43**: Add the Stationery management section as a tab/panel in `src/components/RetailerDashboard.tsx` for retailers.
-
-
+- [x] **Step 44**: Configure local environments (`.env.local` and `.env.production.local`) and all Vercel environment targets (`Production`, `Preview`, `Development`) with the new Gemini API Key (`[REDACTED_GEMINI_API_KEY]`), ensuring build and lint pass successfully.
+- [x] **Step 45**: Create `/src/app/login/page.tsx` client component featuring beautiful dark visual styling, logo acronym box, credentials inputs, and integration with `supabase.auth.signInWithPassword`.
+- [x] **Step 46**: Create `/src/app/signup/page.tsx` client component featuring matching styling, user metadata field, and integration with `supabase.auth.signUp`.
+- [x] **Step 47**: Perform automated build and lint checks (`npm run lint` and checking compilation).
+- [x] **Step 48**: Execute Git commit and push command to synchronize changes.
 
