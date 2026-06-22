@@ -108,4 +108,8 @@
 - [x] **Step 65**: Implement autonomous agent mode loop in assistant and voice-assistant API routes to enable end-to-end multi-turn tool chaining. Use the exact new `create_customer_and_link` handler definition and handler logic to register and link new customers via Supabase Auth Admin.
 - [x] **Step 66**: Fix systemInstruction prompts in both endpoints to enforce aggressive, autonomous action-first agent behaviors.
 - [x] **Step 67**: Verify build and linting checks and commit changes to git.
+- [x] **Step 68**: Hook up `khata-agent-action` CustomEvent listener in ChatAssistant.tsx and RetailerDashboard.tsx to sync and refresh customer relationships.
+- [x] **Step 69**: Implement state `agentFeed` inside RetailerDashboard to maintain and render the floating action feed banner detailing AI agent responses.
+- [x] **Step 70**: Enforce environment variables check for `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` at the entry points of both assistant and voice-assistant POST APIs.
+
 
