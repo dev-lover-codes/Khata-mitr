@@ -117,6 +117,15 @@ export default function RetailerDashboard({ profile, language }: RetailerDashboa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id]);
 
+  // Auto-refresh when the AI agent creates a customer or logs a transaction
+  useEffect(() => {
+    const handleDataChanged = () => {
+      fetchRelationships();
+    };
+    window.addEventListener('khata-data-changed', handleDataChanged);
+    return () => window.removeEventListener('khata-data-changed', handleDataChanged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
 
   // Handle adding customer (Lookup by phone, otherwise insert profile + relationship)

@@ -116,6 +116,29 @@ export const calculateTool = {
   }
 };
 
+export const createCustomerTool = {
+  name: 'create_customer',
+  description: 'Creates a new customer account and links them to the current retailer. Use this when the shopkeeper wants to add a new customer (e.g. "Ramu ka account banao", "Add new customer Raju"). After creating, you can immediately call add_transaction to record any initial credit/debit.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      retailer_id: {
+        type: Type.STRING,
+        description: 'The UUID of the retailer creating the customer.'
+      },
+      customer_name: {
+        type: Type.STRING,
+        description: 'Full name of the new customer (e.g. Ramu, Sita Devi, Mohan Lal).'
+      },
+      phone: {
+        type: Type.STRING,
+        description: 'Optional phone number of the customer. If not provided, leave empty string.'
+      }
+    },
+    required: ['retailer_id', 'customer_name']
+  }
+};
+
 export const addInventoryItemTool = {
   name: 'add_inventory_item',
   description: 'Adds a new item to the store stationery/book inventory.',
@@ -159,6 +182,7 @@ export const khataMitraTools = [
   getLedgerHistoryTool,
   weatherTool,
   calculateTool,
+  createCustomerTool,
   addInventoryItemTool
 ];
 

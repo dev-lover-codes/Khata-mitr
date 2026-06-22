@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { khataMitraTools, generateContentWithRetry } from '@/lib/gemini';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { z } from 'zod';
 
 const requestSchema = z.object({
@@ -100,13 +101,16 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Dynamic Contents construction and Master Bilingual System Instruction
-    const systemInstruction = `You are DukaanBook’s native Indian shopkeeper AI Agent. You will receive input as either written text or a raw voice audio recording. The shopkeeper will speak or type in pure English, pure Hindi (Devanagari script), or Roman Hinglish.
-Your operational mandate is strictly 3 steps:
-Step 1: Listen to the audio or read the text, and deduce the core ledger intent, regardless of grammar or slang.
-Step 2: Autonomously call the required database tools (e.g., create_profile, add_transaction).
-Step 3: Once the database returns success, analyze the EXACT language and script the shopkeeper used to communicate with you, and reply back to them in that exact same tongue. If they spoke Roman Hinglish ("Ramesh ka 500 likho"), reply in clean Roman Hinglish ("Ramesh ke account me ₹500 likh diye hain"). If they used Devanagari Hindi, reply in Devanagari Hindi.
+    const systemInstruction = `You are KhataMitra — a powerful, action-first AI Agent for Indian shopkeepers. You understand English, Hindi (Devanagari), and Roman Hinglish.
 
-Here is the current user profile context for your database operations:
+CRITICAL RULES — FOLLOW WITHOUT EXCEPTION:
+1. ALWAYS ACT — Never apologise, never say "I cannot do that". ALWAYS call the appropriate tool immediately.
+2. CREATE BEFORE TRANSACT — If the shopkeeper wants to add a new customer AND record a transaction (e.g. "Ramu ka account banao aur 500 credit karo"), FIRST call create_customer, THEN call add_transaction with the returned customer_id.
+3. FIND BY NAME — Match customer names from the context list (case-insensitive, partial match OK). If the customer does not exist yet, ALWAYS use create_customer to create them first.
+4. REPLY IN SAME LANGUAGE — Reply in the exact same language/script the shopkeeper used. Hinglish → Hinglish. Hindi → Hindi. English → English.
+5. CONFIRM ACTIONS — After every tool success, confirm what was done with the amount and name. E.g. "Ramu ka account ban gaya aur ₹500 credit ho gaye!"
+
+CURRENT USER CONTEXT (use these IDs for tool calls):
 ${contextInfo}
 Current Time: ${new Date().toISOString()}`;
 
@@ -272,6 +276,81 @@ Current Time: ${new Date().toISOString()}`;
           }
         }
         
+        else if (name === 'create_customer') {
+          const { retailer_id, customer_name, phone } = args as {
+            retailer_id: string;
+            customer_name: string;
+            phone?: string;
+          };
+
+          const adminClient = createAdminClient();
+          const cleanName = customer_name.trim();
+          const cleanPhone = phone ? phone.replace(/[^0-9]/g, '') : '';
+          const timestamp = Date.now();
+          const slugName = cleanName.toLowerCase().replace(/\s+/g, '_');
+          const dummyEmail = cleanPhone
+            ? `customer_${cleanPhone}@khata-mitr.app`
+            : `customer_${slugName}_${timestamp}@khata-mitr.app`;
+          const dummyPassword = `KM_${timestamp}_${Math.random().toString(36).slice(2, 8)}`;
+
+          // Check if customer with same name already exists for this retailer
+          const { data: existingRel } = await supabase
+            .from('relationships')
+            .select('customer_id, profiles!customer_id(full_name)')
+            .eq('retailer_id', retailer_id);
+
+          const existing = (existingRel || []).find((r) => {
+            const p = r.profiles as unknown as { full_name: string } | null;
+            return p?.full_name?.toLowerCase() === cleanName.toLowerCase();
+          });
+
+          if (existing) {
+            toolResponse = {
+              success: true,
+              customer_id: existing.customer_id,
+              already_exists: true,
+              message: `Customer "${cleanName}" already exists with ID ${existing.customer_id}. Use this ID for transactions.`
+            };
+          } else {
+            // Create new Supabase auth user
+            const { data: userData, error: userError } = await adminClient.auth.admin.createUser({
+              email: dummyEmail,
+              password: dummyPassword,
+              email_confirm: true,
+              user_metadata: { full_name: cleanName, phone: cleanPhone || '' }
+            });
+
+            if (userError) throw new Error(`Failed to create auth user: ${userError.message}`);
+
+            const newCustomerId = userData.user.id;
+
+            // Insert profile row
+            const { error: profileError } = await adminClient.from('profiles').upsert({
+              id: newCustomerId,
+              full_name: cleanName,
+              phone: cleanPhone || null,
+              role: 'customer',
+              preferred_language: 'hi'
+            });
+            if (profileError) throw new Error(`Failed to create profile: ${profileError.message}`);
+
+            // Create relationship between retailer and new customer
+            const { error: relError } = await adminClient.from('relationships').insert({
+              retailer_id,
+              customer_id: newCustomerId,
+              balance: 0
+            });
+            if (relError) throw new Error(`Failed to create relationship: ${relError.message}`);
+
+            toolResponse = {
+              success: true,
+              customer_id: newCustomerId,
+              already_exists: false,
+              message: `Customer "${cleanName}" successfully created with ID ${newCustomerId}. Now you can call add_transaction with this customer_id.`
+            };
+          }
+        }
+
         else if (name === 'add_inventory_item') {
           const { retailer_id, item_name, category, quantity, cost_price, selling_price } = args as {
             retailer_id: string;
@@ -365,7 +444,13 @@ Current Time: ${new Date().toISOString()}`;
       }
     ]);
 
-    return NextResponse.json({ response: finalAnswer });
+    // Determine if a data-mutating tool was executed so the frontend can refresh
+    const dataChangingTools = ['add_transaction', 'create_customer', 'add_inventory_item'];
+    const toolExecuted = functionCalls && functionCalls.length > 0
+      ? dataChangingTools.includes(functionCalls[0].name || '')
+      : false;
+
+    return NextResponse.json({ response: finalAnswer, toolExecuted });
 
   } catch (error) {
     console.error('Error in Assistant API:', error);

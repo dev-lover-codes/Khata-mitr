@@ -78,6 +78,12 @@ export default function ChatInput({
       }
 
       onResponseReceived(displayUserMsg, data.response);
+
+      // If the agent executed a data-changing action (create customer / add transaction),
+      // broadcast an event so the dashboard can auto-refresh its customer list.
+      if (data.toolExecuted) {
+        window.dispatchEvent(new CustomEvent('khata-data-changed'));
+      }
     } catch (err) {
       console.error('Payload dispatch error:', err);
       onError(err instanceof Error ? err.message : 'Something went wrong during request processing.');
