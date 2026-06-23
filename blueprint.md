@@ -111,5 +111,9 @@
 - [x] **Step 68**: Hook up `khata-agent-action` CustomEvent listener in ChatAssistant.tsx and RetailerDashboard.tsx to sync and refresh customer relationships.
 - [x] **Step 69**: Implement state `agentFeed` inside RetailerDashboard to maintain and render the floating action feed banner detailing AI agent responses.
 - [x] **Step 70**: Enforce environment variables check for `SUPABASE_SERVICE_ROLE_KEY` and `GEMINI_API_KEY` at the entry points of both assistant and voice-assistant POST APIs.
+- [x] **Step 71**: Define and register `findCustomerTool` (`find_customer`) in `src/lib/gemini.ts`.
+- [x] **Step 72**: Implement the backend handler for `find_customer` inside both text (`/api/assistant`) and voice (`/api/voice-assistant`) endpoints.
+- [x] **Step 73**: Enforce rule in systemInstruction to ALWAYS search using `find_customer` first before calling `create_customer_and_link` or `add_transaction` when a customer name is mentioned.
+- [x] **Step 74**: Run compiler, linter, and build verification checks to guarantee error-free code execution.
 
 

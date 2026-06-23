@@ -109,6 +109,9 @@ CRITICAL OPERATIONAL RULES — STRICTLY ENFORCED:
 4. HINDI / ENGLISH / HINGLISH COMPLIANCE: Respond in the exact same language, script, and style used by the shopkeeper. E.g., Hinglish -> Hinglish, Devanagari Hindi -> Devanagari Hindi.
 5. TRANSCRIBE AND CONFIRM: Start your final reply by transcribing what you heard (e.g. "Maine suna: 'create Ramu account...'"), followed by a clear confirmation of the actions taken. E.g., "Ramu ka account ban gaya aur ₹500 credit/udhaar jod diya gaya hai! ✅"
 6. ERROR RESILIENCE: If any tool fails, explain the exact technical reason to the user with a solution. Never give up.
+7. FIND CUSTOMER FIRST BEFORE TRANSACTING/CREATING: Whenever the retailer mentions a customer name (e.g. "add 100 rupees to Raju", "Raju ko 100 udhaar do"), you MUST call the find_customer tool FIRST to check if they already exist in the retailer's relationships.
+   - If find_customer returns not_found: false (customer found), use the returned customer_id directly to call add_transaction. DO NOT call create_customer_and_link.
+   - If find_customer returns not_found: true (customer not found), only then call create_customer_and_link to create a new customer and link them, and then proceed with the transaction.
  
 CURRENT USER CONTEXT (use these IDs for tool calls):
 ${contextInfo}
@@ -339,6 +342,81 @@ Current Time: ${new Date().toISOString()}`;
               customer_id: newCustomerId,
               already_exists: false,
               message: `Customer "${cleanName}" successfully created with ID ${newCustomerId}. Now you can call add_transaction with this customer_id.`
+            };
+          }
+        }
+
+        else if (name === 'find_customer') {
+          const { retailer_id, customer_name } = args as {
+            retailer_id: string;
+            customer_name: string;
+          };
+
+          try {
+            const { createClient: createAdminSupabase } = await import('@supabase/supabase-js');
+            const adminClient = createAdminSupabase(
+              process.env.NEXT_PUBLIC_SUPABASE_URL!,
+              process.env.SUPABASE_SERVICE_ROLE_KEY!,
+              { auth: { autoRefreshToken: false, persistSession: false } }
+            );
+
+            // Search relationships for this retailer and do a case-insensitive name match
+            const { data: relationships, error } = await adminClient
+              .from('relationships')
+              .select(`
+                id,
+                customer_id,
+                balance,
+                profiles!customer_id(full_name, phone)
+              `)
+              .eq('retailer_id', retailer_id);
+
+            if (error) throw new Error(error.message);
+
+            if (!relationships || relationships.length === 0) {
+              toolResponse = {
+                success: true,
+                not_found: true,
+                message: `No customers found for this retailer yet. Use create_customer_and_link to add "${customer_name}".`
+              };
+            } else {
+              // Case-insensitive partial name match
+              const searchName = customer_name.toLowerCase().trim();
+              const match = relationships.find((r) => {
+                const profile = r.profiles as unknown as { full_name: string; phone: string | null } | null;
+                return profile?.full_name?.toLowerCase().includes(searchName);
+              });
+
+              if (match) {
+                const profile = match.profiles as unknown as { full_name: string; phone: string | null } | null;
+                toolResponse = {
+                  success: true,
+                  not_found: false,
+                  customer_id: match.customer_id,
+                  relationship_id: match.id,
+                  customer_name: profile?.full_name,
+                  current_balance: match.balance,
+                  message: `Customer found: "${profile?.full_name}" with customer_id ${match.customer_id} and current balance ₹${match.balance}. Use this customer_id for add_transaction. DO NOT call create_customer_and_link.`
+                };
+              } else {
+                // List all existing customer names to help AI understand what exists
+                const existingNames = relationships.map((r) => {
+                  const p = r.profiles as unknown as { full_name: string } | null;
+                  return p?.full_name || 'Unknown';
+                }).join(', ');
+
+                toolResponse = {
+                  success: true,
+                  not_found: true,
+                  existing_customers: existingNames,
+                  message: `No customer named "${customer_name}" found in retailer's ledger. Existing customers: [${existingNames}]. If you are sure this is a new customer, call create_customer_and_link. If the name might be a spelling variation of an existing customer, inform the retailer.`
+                };
+              }
+            }
+          } catch (err) {
+            toolResponse = {
+              success: false,
+              error: err instanceof Error ? err.message : 'Unknown error during customer search'
             };
           }
         }

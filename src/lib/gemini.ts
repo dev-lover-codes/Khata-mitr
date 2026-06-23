@@ -199,7 +199,27 @@ export const addInventoryItemTool = {
 };
 
 // All available tools grouped
+export const findCustomerTool = {
+  name: 'find_customer',
+  description: 'Search for an existing customer by name within the retailer ledger relationships. ALWAYS call this tool FIRST before calling create_customer_and_link or add_transaction when the user mentions a customer name. Returns customer_id if found, or null if not found. If found, use the returned customer_id directly for add_transaction. Only call create_customer_and_link if this tool returns not_found: true.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      retailer_id: {
+        type: Type.STRING,
+        description: 'UUID of the retailer.'
+      },
+      customer_name: {
+        type: Type.STRING,
+        description: 'The name (or partial name) of the customer to search for (e.g. "Raju", "Ramesh").'
+      }
+    },
+    required: ['retailer_id', 'customer_name']
+  }
+};
+
 export const khataMitraTools = [
+  findCustomerTool,
   addTransactionTool,
   getBalanceTool,
   getLedgerHistoryTool,
