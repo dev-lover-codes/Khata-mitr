@@ -32,11 +32,9 @@ jobs:
         env:
           SB_URL: ${{ secrets.SUPABASE_URL }}
           SB_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SB_TABLE: ${{ vars.SUPABASE_TABLE || 'doctors' }}
-          SB_SELECT: ${{ vars.SUPABASE_SELECT || 'id' }}
         run: |
           http_code=$(curl -s -o response.json -w "%{http_code}" \
-            "${SB_URL}/rest/v1/${SB_TABLE}?select=${SB_SELECT}&limit=1" \
+            "${SB_URL}/rest/v1/" \
             -H "apikey: ${SB_KEY}" \
             -H "Authorization: Bearer ${SB_KEY}")
 
@@ -48,7 +46,7 @@ jobs:
             exit 1
           fi
 
-          echo "Supabase heartbeat OK ($http_code) — table: $SB_TABLE"
+          echo "Supabase heartbeat OK ($http_code)"
 
       - name: Update heartbeat file and push
         run: |
