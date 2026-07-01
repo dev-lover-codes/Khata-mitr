@@ -1,21 +1,39 @@
-name: Keep Supabase Alive
+name: Keep Alive
 
 on:
   schedule:
-    # Runs automatically every 5 days at 8:00 AM UTC
-    - cron: '0 8 */5 * *'
-  workflow_dispatch: # Allows manual trigger from the GitHub UI
+    # Runs automatically every 5 days at midnight
+    - cron: '0 0 */5 * *'
+  workflow_dispatch: # Allows manual trigger for testing
 
 jobs:
-  ping:
+  database_heartbeat:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST Endpoint
-        env:
-          # UPDATE THESE TWO LINES BELOW to match the new GitHub Secret names
-          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-        run: |
-          curl -i -s "$SUPABASE_URL/rest/v1/" \
-            -H "apikey: $SUPABASE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_KEY"
+    - name: Checkout Repository Code
+      uses: actions/checkout@v3
+      with:
+        # Uses your Personal Access Token secret (GH_PAT) so it registers as human activity
+        token: ${{ secrets.GH_PAT }}
+
+    - name: Execute Live Supabase Database Query
+      run: |
+        curl -X GET "https://shpivpyjrevwouefxsma.supabase.co/rest/v1/doctors?select=*" \
+        -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+        -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
+
+    - name: Reset 60-Day Supabase & GitHub Workflow Disabling Timers
+      run: |
+        # 1. Update the timestamp file for Supabase activity
+        echo "Last database heartbeat check-in executed on: $(date)" > library_heartbeat.txt
+        
+        # 2. Setup git configurations
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Automation Bot"
+        
+        # 3. Commit the timestamp change to keep the repository active
+        git add library_heartbeat.txt
+        git commit -m "System routine maintenance heartbeat [skip ci]" || exit 0
+        
+        # 4. Push directly back to the main branch
+        git push origin HEAD:main
