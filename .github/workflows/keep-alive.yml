@@ -25,18 +25,14 @@ jobs:
         run: |
           missing=0
           [ -z "${{ secrets.SUPABASE_URL }}" ] && echo "::error::SUPABASE_URL secret is missing" && missing=1
-          [ -z "${{ secrets.SUPABASE_ANON_KEY }}" ] && echo "::error::SUPABASE_ANON_KEY secret is missing" && missing=1
           [ "$missing" -eq 1 ] && exit 1 || true
 
-      - name: Execute Live Supabase Database Query
+      - name: Execute Live Supabase Health Check
         env:
           SB_URL: ${{ secrets.SUPABASE_URL }}
-          SB_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           http_code=$(curl -s -o response.json -w "%{http_code}" \
-            "${SB_URL}/rest/v1/" \
-            -H "apikey: ${SB_KEY}" \
-            -H "Authorization: Bearer ${SB_KEY}")
+            "${SB_URL}/auth/v1/health")
 
           echo "HTTP status: $http_code"
 
